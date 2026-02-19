@@ -1,0 +1,21 @@
+# Data files
+data/
+*.csv
+*.xlsx
+
+# Model Artifacts & Output
+artifacts/
+*.pkl
+*.png
+*.jpg
+*.log
+
+# Python Cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Virtual Environments (if you ever make one)
+venv/
+env/
+.env
