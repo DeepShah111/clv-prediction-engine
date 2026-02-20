@@ -10,7 +10,6 @@ from sklearn.metrics import mean_squared_error
 from src.config import logger
 
 def evaluate_and_plot(model, champion_name: str, X_test: pd.DataFrame, y_test: pd.Series):
-    """Calculates WAPE, plots accuracy, and generates a Business Lift Chart."""
     logger.info("[8/8] Evaluating Business Impact...")
     preds = model.predict(X_test)
     
@@ -41,10 +40,10 @@ def evaluate_and_plot(model, champion_name: str, X_test: pd.DataFrame, y_test: p
     plt.savefig('artifacts/business_lift.png')
     plt.close()
     
-    logger.info("   ✓ Evaluation plots saved to artifacts/ folder.")
+    logger.info("Evaluation plots saved to artifacts/ folder.")
 
 def save_model(model, feature_names: list):
-    """Saves the final champion model to disk."""
+    #Saving the final champion model to disk.
     bundle = {
         'model': model,
         'feature_names': feature_names,
@@ -52,4 +51,4 @@ def save_model(model, feature_names: list):
         'version': '1.2.0'
     }
     joblib.dump(bundle, 'artifacts/clv_champion_bundle.pkl')
-    logger.info("   ✓ Production Bundle Saved to artifacts/clv_champion_bundle.pkl")
+    logger.info("Production Bundle Saved to artifacts/clv_champion_bundle.pkl")

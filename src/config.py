@@ -6,12 +6,12 @@ import warnings
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# --- Setup & Styling ---
+
 warnings.filterwarnings('ignore')
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (14, 7)
 
-# --- Logging Configuration ---
+# Logging Configuration 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - [%(levelname)s] - %(message)s',
@@ -22,12 +22,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Project Constants ---
+# Project Constants 
 FILE_ID = "1LwlhwSCCMOq0wcW9Yghn8UbrEmWVF8f4"
 DOWNLOAD_URL = f"https://drive.google.com/uc?id={FILE_ID}"
 FILEPATH = "online_retail_II.csv"
 
-# --- Modeling Parameters ---
+# Modeling Parameters 
 SPLIT_DAYS = 90
 TARGET_COL = 'Next_3M_Spend'
 FEATURE_COLS = [

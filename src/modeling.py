@@ -1,6 +1,3 @@
-"""
-Machine Learning models, training, and hyperparameter tuning.
-"""
 import pandas as pd
 import numpy as np
 import warnings
@@ -18,7 +15,6 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
 from src.config import logger
 
-# Advanced Boosting (Graceful Fallback - Your exact logic)
 try:
     from xgboost import XGBRegressor
     from lightgbm import LGBMRegressor
@@ -26,7 +22,7 @@ try:
     ADVANCED_BOOSTING_AVAILABLE = True
 except ImportError:
     ADVANCED_BOOSTING_AVAILABLE = False
-    warnings.warn("Advanced Boosting libraries not found. Using standard sklearn only.")
+    warnings.warn("Advanced Boosting libraries not found. Using standard sklearn.")
 
 class NaiveBaseline(BaseEstimator, RegressorMixin):
     """
@@ -40,7 +36,7 @@ class NaiveBaseline(BaseEstimator, RegressorMixin):
         return X['Monetary'].values
 
 def train_and_benchmark(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: pd.Series, y_test: pd.Series):
-    """Trains models and ranks by RMSE."""
+    #Trains models and ranks by RMSE.
     logger.info("[6/8] Benchmarking Model Zoo...")
     models = {
         "Naive Baseline": NaiveBaseline(),
@@ -66,7 +62,7 @@ def train_and_benchmark(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: pd
             r2 = r2_score(y_test, preds)
             results.append({'Model': name, 'RMSE': rmse, 'MAE': mae, 'R2': r2, 'Object': model})
         except Exception as e:
-            logger.warning(f"   ! Failed to train {name}: {e}")
+            logger.warning(f"Failed to train {name}: {e}")
 
     leaderboard_df = pd.DataFrame(results).sort_values(by='RMSE')
     print("\n" + "="*60 + "\n   MASTER MODEL LEADERBOARD (Test Set)\n" + "="*60)
@@ -78,7 +74,6 @@ def train_and_benchmark(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: pd
     return best_ml_model, champion_name, leaderboard_df
 
 def tune_champion_model(best_ml_model, champion_name: str, X_train: pd.DataFrame, y_train: pd.Series):
-    """Tunes the champion model using your exact grid search."""
     logger.info(f"[7/8] Tuning Champion: {champion_name}...")
     
     param_grids = {
@@ -97,5 +92,5 @@ def tune_champion_model(best_ml_model, champion_name: str, X_train: pd.DataFrame
         logger.info("   ✓ Tuning Complete.")
         return grid.best_estimator_
     
-    logger.info("   - No tuning parameters defined for this model. Skipping.")
+    logger.info(" No tuning parameters defined for this model. Skipping.")
     return best_ml_model

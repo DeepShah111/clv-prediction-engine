@@ -8,7 +8,6 @@ from sklearn.model_selection import train_test_split
 from src.config import logger, FEATURE_COLS
 
 def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
-    """Generates features using Probabilistic Models (BTYD) + RFM."""
     logger.info("[3/8] Engineering Features (Leakage-Proof)...")
     
     # Temporal Split
@@ -31,15 +30,12 @@ def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
     # Target Generation
     y = future.groupby('Customer ID')[['TotalAmount']].sum().rename(columns={'TotalAmount': 'Next_3M_Spend'})
     
-    # Merge
     rfm.rename(columns={'recency': 'Recency', 'frequency': 'Frequency', 'monetary_value': 'Monetary'}, inplace=True)
     full_data = rfm.join(y, how='left').fillna(0)
     
-    # --- CRITICAL FIX: Floor negative targets to 0 for Tweedie models ---
     target_cap = full_data['Next_3M_Spend'].quantile(0.99)
     full_data['Next_3M_Spend'] = full_data['Next_3M_Spend'].clip(lower=0, upper=target_cap)
     
-    # Train/Test Split
     X_cols = ['Recency', 'Frequency', 'Monetary', 'Interpurchase_Std', 'T']
     X_raw = full_data[X_cols]
     y_raw = full_data['Next_3M_Spend']
@@ -48,7 +44,7 @@ def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
         X_raw, y_raw, test_size=0.2, random_state=42
     )
     
-    # Fit Probabilistic Models (Train Set Only)
+    # Fitting Probabilistic Models (Train Set Only)
     bgf = BetaGeoFitter(penalizer_coef=0.01)
     bgf.fit(X_train_raw['Frequency'], X_train_raw['Recency'], X_train_raw['T'])
     
@@ -56,7 +52,6 @@ def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
     train_gg = X_train_raw[X_train_raw['Frequency'] > 0]
     ggf.fit(train_gg['Frequency'], train_gg['Monetary'])
     
-    # Transform
     def add_prob_features(data_split):
         data = data_split.copy()
         data['Prob_Pred_Txn'] = bgf.predict(split_days, data['Frequency'], data['Recency'], data['T'])
@@ -66,6 +61,6 @@ def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
     X_train = add_prob_features(X_train_raw)[FEATURE_COLS]
     X_test = add_prob_features(X_test_raw)[FEATURE_COLS]
     
-    logger.info(f"   ✓ Feature Engineering Complete. Train Size: {len(X_train)}")
+    logger.info(f"Feature Engineering Complete. Train Size: {len(X_train)}")
     
     return X_train, X_test, y_train, y_test
