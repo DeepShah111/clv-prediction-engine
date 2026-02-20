@@ -57,6 +57,6 @@ Clone this repository to your local machine.
 
 Upload the clv-prediction-engine folder to the root of your Google Drive.
 
-Open notebooks/main_execution.ipynb in Google Colab.
+Open notebooks/main_execution.ipynb in Google Colab .
 
 Execute the notebook to automatically mount your drive, fetch the dataset, train the models, and serialize the champion pipeline to the artifacts/ directory.
