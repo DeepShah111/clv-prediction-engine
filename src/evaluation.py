@@ -1,6 +1,3 @@
-# ==============================================================================
-# evaluation.py
-# ==============================================================================
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,7 +14,7 @@ def evaluate_and_plot(model, champion_name: str, X_test: pd.DataFrame, y_test: p
     rmse = np.sqrt(mean_squared_error(y_test, preds))
     wape = np.sum(np.abs(y_test - preds)) / np.sum(y_test)
     
-    print(f"\n FINAL METRICS ({champion_name}) <<<\n   RMSE: ${rmse:.2f}\n   WAPE:  {wape:.2%}")
+    print(f"\n FINAL METRICS ({champion_name})\n   RMSE: ${rmse:.2f}\n   WAPE:  {wape:.2%}")
     
     # Plot 1: Actual vs Predicted
     plt.figure(figsize=(10, 6))
@@ -40,7 +37,7 @@ def evaluate_and_plot(model, champion_name: str, X_test: pd.DataFrame, y_test: p
     plt.savefig('artifacts/business_lift.png', bbox_inches='tight')
     plt.close()
     
-    # Plot 3: Feature Importance (The "Why")
+    # Plot 3: Feature Importance
     try:
         estimator = model.named_steps['regressor'] if hasattr(model, 'named_steps') else model
         

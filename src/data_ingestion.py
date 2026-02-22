@@ -25,7 +25,7 @@ def load_data(filepath: str = FILEPATH, url: str = DOWNLOAD_URL) -> pd.DataFrame
         raise RuntimeError(f"Data Load Failed: {e}")
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    logger.info("[2/8] Cleaning Data & Handling Returns...")
+    logger.info("[2/8] Cleaning Data & Handling Returns")
     cleaned_df = df.copy()
     
     cleaned_df.dropna(subset=['Customer ID'], inplace=True)

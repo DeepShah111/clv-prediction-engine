@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from src.config import logger, FEATURE_COLS
 
 def build_hybrid_features(df: pd.DataFrame, split_days: int = 90):
-    logger.info("[3/8] Engineering Features (Leakage-Proof)...")
+    logger.info("[3/8] Engineering Features")
     
     # Temporal Split
     max_date = df['InvoiceDate'].max()

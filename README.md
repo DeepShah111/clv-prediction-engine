@@ -1,62 +1,103 @@
-#  Enterprise Customer Lifetime Value (CLV) Prediction Engine
+# Enterprise Customer Lifetime Value (CLV) Prediction Engine
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-1.3-orange.svg)](https://scikit-learn.org/)
-[![Lifetimes](https://img.shields.io/badge/Lifetimes-BTYD-success.svg)](#)
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![Scikit-Learn](https://img.shields.io/badge/Library-Scikit--Learn-orange)
+![Lifetimes](https://img.shields.io/badge/Library-Lifetimes_(BTYD)-success)
+![Status](https://img.shields.io/badge/Status-Production--Ready-red)
 
-## Executive Summary & Business Problem
-In e-commerce, predicting future customer spend is a notoriously difficult machine learning challenge. Traditional regression fails because retail data is **zero-inflated** (many customers never return) and highly skewed. 
+> **A Hybrid Probabilistic & Machine Learning Pipeline for E-Commerce Revenue Forecasting.**
+> *Optimizing Customer Acquisition Costs (CAC) through accurate 90-day spend prediction.*
 
-This repository implements a production-grade **Hybrid Probabilistic-Machine Learning Pipeline** to predict 90-day Customer Lifetime Value (CLV) based on historical transaction logs. By accurately forecasting future spend, businesses can optimize customer acquisition costs (CAC) and aggressively target high-value retention campaigns.
+---
 
-## Technical Methodology
-To handle the heavy-tailed, zero-inflated nature of spend data, this pipeline avoids standard linear regression in favor of a hybrid approach:
+## Executive Summary & Business Case
 
-1. **BTYD Probabilistic Modeling:** Utilizes the `Lifetimes` library to fit Beta-Geometric/Negative Binomial (BG/NBD) and Gamma-Gamma models. This extracts deep behavioral features such as *Probability Alive* and *Conditional Expected Value*.
-2. **Feature Engineering:** Combines probabilistic outputs with standard RFM (Recency, Frequency, Monetary) metrics and Interpurchase Time Standard Deviation.
-3. **Advanced Regression (Tweedie Loss):** Evaluates a Model Zoo, specifically leveraging Tweedie objective functions to mathematically model sparse, non-negative continuous spend data.
+In e-commerce, predicting future customer spend is a notoriously difficult machine learning challenge. Traditional regression fails because retail data is fundamentally **zero-inflated** (many customers never return) and highly skewed (a few "whales" drive the majority of revenue).
 
-## Repository Architecture
-Structured adhering to strict MLOps and Separation of Concerns principles:
+This project implements a production-grade **Hybrid Pipeline** to predict 90-day Customer Lifetime Value (CLV) based on historical transaction logs. By accurately identifying which customers will generate the most future value, businesses can aggressively target high-value retention campaigns and stop wasting marketing budget on churned users.
+
+---
+
+## Technical Architecture & Methodology
+
+To handle the heavy-tailed nature of spend data, this pipeline avoids standard linear regression in favor of a robust, two-stage hybrid approach:
+
+### 1. BTYD Probabilistic Modeling (The "Priors")
+We utilize the `Lifetimes` library to fit **Beta-Geometric/Negative Binomial (BG/NBD)** and **Gamma-Gamma** models. This extracts deep, behavioral probabilistic features that standard RFM analysis misses:
+* `Prob_Alive`: The mathematical probability that a customer hasn't permanently churned.
+* `Exp_Purchases`: Conditional expected number of future transactions.
+
+### 2. Feature Engineering
+We combine the probabilistic outputs with standard **RFM (Recency, Frequency, Monetary)** metrics and standard deviation of interpurchase time to create a rich, multidimensional customer profile.
+
+### 3. Advanced Machine Learning (The "Engine")
+We evaluated a robust Model Zoo (including Tweedie Regression to mathematically model sparse, non-negative continuous data). **Random Forest** emerged as the champion model, capturing the complex, non-linear relationships between purchase frequency and future spend.
+
+---
+
+## Evaluation & Leaderboard
+
+Models were evaluated on a strictly isolated, out-of-time test set. The Champion Model outperformed the Naive Baseline (historical average) by a massive margin.
+
+| Model | RMSE ($) | MAE ($) | R² Score |
+| :--- | :--- | :--- | :--- |
+| **Random Forest (Champion)** | **$1057.78** | **$593.69** | **0.640** |
+| Linear Regression | $1153.79 | $639.03 | 0.572 |
+| Ridge (L2) | $1159.00 | $640.82 | 0.568 |
+| ElasticNet | $1240.52 | $671.10 | 0.505 |
+| Tweedie Regressor | $1271.45 | $661.78 | 0.480 |
+| *Naive Baseline* | *$1732.31* | *$792.59* | *0.036* |
+
+**Final Business Metric:** WAPE (Weighted Absolute Percentage Error): **63.16%**
+
+---
+
+## Visual Evidence (Business Impact)
+
+### 1. Business Lift Analysis (The ROI Chart)
+*This gain chart proves the business value. By targeting the top 20% of customers identified by our model, the business captures nearly 60% of total future revenue, drastically outperforming random marketing.*
+![Business Lift](artifacts/graphs/business_lift.png)
+
+### 2. Feature Importance (The "Why")
+*The Random Forest relies heavily on Frequency and Monetary value, but notice how the Probabilistic Features (`Prob_Pred_Val`, `Prob_Pred_Txn`) engineered via the BTYD models drive the predictive power.*
+![Feature Importance](artifacts/graphs/feature_importance.png)
+
+### 3. Actual vs. Predicted Spend (Statistical Validation)
+*Model predictions cluster closely around the line of best fit, especially for low-to-medium spenders, successfully handling the zero-inflation problem.*
+![Accuracy Check](artifacts/graphs/accuracy_check.png)
+
+---
+
+## Repository Structure
 
 ```text
 clv-prediction-engine/
 │
-├── data/                      # Local data storage (Git-ignored)
+├── artifacts/                  # Auto-generated outputs
+│   ├── data/                   # Raw & Processed Datasets (Git-ignored)
+│   ├── graphs/                 # Visualizations (Lift, Importance, Accuracy)
+│   └── models/                 # Serialized Champion Models (Git-ignored)
+│
 ├── notebooks/
-│   └── main_execution.ipynb   # Colab control center & pipeline orchestration
-├── src/                       # Modularized core logic
+│   └── main_execution.ipynb    # Main Driver Script (Colab / Jupyter)
+│
+├── src/                        # Modularized Source Code
 │   ├── __init__.py
-│   ├── config.py              # Centralized hyperparameters and I/O paths
-│   ├── data_ingestion.py      # Automated fetching and preprocessing
-│   ├── feature_engineering.py # BTYD and RFM feature generation
-│   ├── modeling.py            # Model zoo, training, and GridSearch tuning
-│   └── evaluation.py          # Business metric calculations and artifact saving
-├── artifacts/                 # Serialized champion models and EDA plots (Git-ignored)
-├── .gitignore                 # Version control exclusions
-└── README.md                  # Project documentation
+│   ├── config.py               # Centralized hyperparameters & paths
+│   ├── data_ingestion.py       # Automated fetching & preprocessing
+│   ├── feature_engineering.py  # BTYD & RFM feature generation
+│   ├── modeling.py             # Model Zoo & Training Pipeline
+│   └── evaluation.py           # Metrics Calculation & Plotting
+│
+├── .gitignore                  # Version control exclusions
+├── README.md                   # Project Documentation
+└── requirements.txt            # Dependencies
 
+ How to Run
+This pipeline is optimized for Google Colab with seamless Google Drive integration.
 
-📊 Performance & Results
-Models were evaluated on a strict out-of-time test set. The Random Forest Regressor emerged as the champion model, capturing complex non-linear relationships and outperforming the Naive Baseline (historical average) by a massive margin.
+Clone & Upload: Download this repository and upload the folder to your Google Drive.
 
-Model                   ,RMSE ($),MAE ($),R² Score
-Random Forest (Champion),1057.78 ,593.69 ,0.640
-Linear Regression       ,1153.79 ,639.03 ,0.572
-Ridge (L2)              ,1159.00 ,640.82 ,0.568
-ElasticNet              ,1240.52 ,671.10 ,0.505
-Tweedie Regressor       ,1271.45 ,661.78 ,0.480
-Naive Baseline          ,1732.31 ,792.59 ,0.036
+Execute: Open notebooks/main_execution.ipynb in Google Colab.
 
-Final Business Metric: WAPE (Weighted Absolute Percentage Error): 63.16%
-
-How to Run the Pipeline
-This pipeline is designed to be executed via Google Colab with Google Drive integration for remote execution.
-
-Clone this repository to your local machine.
-
-Upload the clv-prediction-engine folder to the root of your Google Drive.
-
-Open notebooks/main_execution.ipynb in Google Colab .
-
-Execute the notebook to automatically mount your drive, fetch the dataset, train the models, and serialize the champion pipeline to the artifacts/ directory.
+Run All Cells: The script will automatically fetch the dataset, engineer the probabilistic features, train the model zoo, and serialize the champion pipeline.

@@ -89,7 +89,7 @@ def tune_champion_model(best_ml_model, champion_name: str, X_train: pd.DataFrame
     if grid_params:
         grid = GridSearchCV(best_ml_model, grid_params, cv=3, scoring='neg_mean_absolute_error', n_jobs=-1)
         grid.fit(X_train, y_train)
-        logger.info("   ✓ Tuning Complete.")
+        logger.info("Tuning Complete.")
         return grid.best_estimator_
     
     logger.info(" No tuning parameters defined for this model. Skipping.")
