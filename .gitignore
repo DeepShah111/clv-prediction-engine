@@ -9,7 +9,7 @@ data/
 # 📦 Model Artifacts & Output
 # ------------------------------------------------------------------------------
 # Ignore the main artifacts folder and heavy model files
-artifacts/
+artifacts/*
 *.pkl
 *.log
 
