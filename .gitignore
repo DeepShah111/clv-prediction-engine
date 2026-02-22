@@ -1,21 +1,34 @@
-# Data files
+# ------------------------------------------------------------------------------
+# 💾 Data files & Big Files
+# ------------------------------------------------------------------------------
 data/
 *.csv
 *.xlsx
 
-# Model Artifacts & Output
+# ------------------------------------------------------------------------------
+# 📦 Model Artifacts & Output
+# ------------------------------------------------------------------------------
+# Ignore the main artifacts folder and heavy model files
 artifacts/
 *.pkl
-*.png
-*.jpg
 *.log
 
-# Python Cache
+# EXCEPTION: Allow the graphs folder and the images inside it so the README works!
+!artifacts/graphs/
+!artifacts/graphs/*.png
+!artifacts/graphs/*.jpg
+
+# ------------------------------------------------------------------------------
+# 🐍 Python Cache & Checkpoints
+# ------------------------------------------------------------------------------
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+*/.ipynb_checkpoints/*
 
-# Virtual Environments (if you ever make one)
+# ------------------------------------------------------------------------------
+# 🛠️ Virtual Environments
+# ------------------------------------------------------------------------------
 venv/
 env/
 .env
