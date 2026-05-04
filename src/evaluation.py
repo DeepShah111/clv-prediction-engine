@@ -18,6 +18,15 @@ UPGRADED v2.3.0 (Round 6):
     - Segment-level evaluation with train-derived thresholds
     - Plots 1 (accuracy), 2 (lift), 4 (residuals)
     - Segment CSV export + model serialization
+
+  NEW v2.6.0 (Upgrade Round 7):
+    Plot 8 (new) — SHAP vs LIME feature ranking comparison for a
+                   representative mid-spender. Side-by-side normalised
+                   bar chart. Requires both shap and lime installed.
+                   Graceful no-op if either is absent.
+    NEW PARAMETER:
+    evaluate_and_plot(..., X_train=None)
+    Pass X_train from main_execution.ipynb to enable Plot 8.
 """
 import logging
 import pandas as pd
@@ -32,13 +41,25 @@ from src.config import GRAPHS_DIR, MODELS_DIR, MODEL_VERSION
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
 # Optional SHAP — graceful degradation if not installed
+# ---------------------------------------------------------------------------
 try:
     import shap
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
     logger.info("shap not installed — SHAP plots skipped. Run: pip install shap")
+
+# ---------------------------------------------------------------------------
+# Optional LIME — graceful degradation if not installed  [NEW v2.6.0]
+# ---------------------------------------------------------------------------
+try:
+    from lime.lime_tabular import LimeTabularExplainer
+    LIME_AVAILABLE = True
+except ImportError:
+    LIME_AVAILABLE = False
+    logger.info("lime not installed — LIME plots skipped. Run: pip install lime")
 
 
 # ===========================================================================
@@ -73,17 +94,212 @@ def _get_tree_importances(estimator) -> np.ndarray | None:
       - sklearn Pipeline        (accesses 'model' named step)
     Returns None if the estimator has no feature_importances_.
     """
-    # Unwrap CalibratedClassifierCV
     if hasattr(estimator, 'calibrated_classifiers_'):
         cal = estimator.calibrated_classifiers_[0]
-        # sklearn >= 1.2 uses .estimator; older uses .base_estimator
         estimator = getattr(cal, 'estimator', getattr(cal, 'base_estimator', estimator))
 
-    # Unwrap sklearn Pipeline
     if hasattr(estimator, 'named_steps'):
         estimator = estimator.named_steps.get('model', estimator)
 
     return getattr(estimator, 'feature_importances_', None)
+
+
+# ===========================================================================
+# LIME Helper  [NEW v2.6.0]
+# ===========================================================================
+
+def _lime_explanation(
+    model,
+    X_train: pd.DataFrame,
+    X_sample: pd.DataFrame,
+    n_samples: int = 500,
+) -> dict | None:
+    """
+    Generates LIME TabularExplainer weights for a single customer.
+
+    For TwoStage models, explains the Stage 2 regressor (log-scale output)
+    since that is what SHAP also targets — ensures apples-to-apples comparison.
+
+    Parameters
+    ----------
+    model     : fitted champion (full TwoStage or single-stage)
+    X_train   : training feature DataFrame — LIME background distribution
+    X_sample  : single-row DataFrame for the customer to explain
+    n_samples : LIME perturbation samples (higher = more stable, slower)
+
+    Returns
+    -------
+    dict mapping feature_name_string → LIME weight, or None on failure.
+    """
+    if not LIME_AVAILABLE:
+        return None
+
+    try:
+        # For TwoStage models, explain Stage 2 regressor for consistency with SHAP
+        predict_fn = model.predict
+        if hasattr(model, 'regressor_') and model.regressor_ is not None:
+            predict_fn = model.regressor_.predict
+
+        explainer = LimeTabularExplainer(
+            training_data         = X_train.values,
+            feature_names         = list(X_train.columns),
+            mode                  = "regression",
+            random_state          = 42,
+            discretize_continuous = False,
+        )
+
+        explanation = explainer.explain_instance(
+            data_row     = X_sample.values[0],
+            predict_fn   = predict_fn,
+            num_features = len(X_train.columns),
+            num_samples  = n_samples,
+        )
+
+        # Returns list of (feature_condition_string, weight) pairs
+        return dict(explanation.as_list())
+
+    except Exception as lime_err:
+        logger.warning(f"LIME explanation failed: {lime_err}", exc_info=True)
+        return None
+
+
+# ===========================================================================
+# SHAP vs LIME Comparison Plot  [NEW v2.6.0]
+# ===========================================================================
+
+def _shap_vs_lime_comparison_plot(
+    model,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    dollar_preds: np.ndarray,
+    dollar_actual: np.ndarray,
+    champion_name: str,
+) -> None:
+    """
+    Generates Plot 8: side-by-side SHAP vs LIME feature ranking comparison
+    for a representative mid-spender customer.
+
+    Why mid-spender: whale customers dominate both explainers with extreme
+    Monetary values — mid-spender shows more informative feature interplay.
+
+    Agreement between SHAP and LIME = strong, stable feature signal.
+    Divergence = interaction effects or LIME local-linear approximation limits.
+
+    Saves to: GRAPHS_DIR / 'shap_vs_lime_comparison.png'
+    """
+    if not SHAP_AVAILABLE or not LIME_AVAILABLE:
+        missing = [x for x, ok in [("shap", SHAP_AVAILABLE), ("lime", LIME_AVAILABLE)] if not ok]
+        logger.info(
+            f"SHAP vs LIME comparison skipped — missing: {', '.join(missing)}. "
+            f"Install with: pip install {' '.join(missing)}"
+        )
+        return
+
+    try:
+        # --- Pick representative mid-spender ---
+        positive_idx = np.where(dollar_actual > 0)[0]
+        if len(positive_idx) < 5:
+            logger.warning("SHAP vs LIME: insufficient spending customers. Skipped.")
+            return
+
+        median_val   = np.median(dollar_actual[positive_idx])
+        mid_local    = np.argmin(np.abs(dollar_actual[positive_idx] - median_val))
+        customer_idx = positive_idx[mid_local]
+        X_sample     = X_test.iloc[[customer_idx]]
+
+        # --- SHAP values (Stage 2 regressor, tree-based) ---
+        shap_estimator = model
+        if hasattr(model, 'regressor_') and model.regressor_ is not None:
+            shap_estimator = model.regressor_
+
+        if not hasattr(shap_estimator, 'feature_importances_'):
+            logger.warning("SHAP vs LIME: model has no tree structure for SHAP. Skipped.")
+            return
+
+        explainer = shap.TreeExplainer(shap_estimator)
+        shap_vals = explainer.shap_values(X_sample)[0]   # shape: (n_features,)
+
+        shap_df = (
+            pd.DataFrame({
+                'Feature': list(X_test.columns),
+                'SHAP':    np.abs(shap_vals),
+            })
+            .sort_values('SHAP', ascending=False)
+            .head(12)
+        )
+        top_features = list(shap_df['Feature'])
+
+        # --- LIME weights ---
+        lime_weights = _lime_explanation(model, X_train, X_sample)
+        if lime_weights is None:
+            logger.warning("LIME returned None — SHAP vs LIME plot skipped.")
+            return
+
+        # LIME keys are "feature_name OPERATOR value" strings — match by prefix
+        def _match_feature(lime_key: str, feature_names: list) -> str | None:
+            for fname in feature_names:
+                if lime_key.startswith(fname):
+                    return fname
+            return None
+
+        lime_mapped = {}
+        for key, weight in lime_weights.items():
+            feat = _match_feature(key, list(X_test.columns))
+            if feat:
+                lime_mapped[feat] = lime_mapped.get(feat, 0) + abs(weight)
+
+        # Align LIME values to SHAP top-feature order
+        shap_vals_aligned = np.array(list(shap_df['SHAP']))
+        lime_vals_aligned = np.array([lime_mapped.get(f, 0.0) for f in top_features])
+
+        # Normalise both to [0, 1] for fair visual comparison
+        shap_norm = shap_vals_aligned / (shap_vals_aligned.max() + 1e-8)
+        lime_norm = lime_vals_aligned / (lime_vals_aligned.max() + 1e-8)
+
+        # --- Plot ---
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+        y_pos = np.arange(len(top_features))
+
+        # Left panel: SHAP
+        axes[0].barh(y_pos, shap_norm[::-1], color='#5C4DB1', alpha=0.85)
+        axes[0].set_yticks(y_pos)
+        axes[0].set_yticklabels(top_features[::-1], fontsize=10)
+        axes[0].set_xlabel('Normalised |SHAP value|', fontsize=11)
+        axes[0].set_title(
+            'SHAP — Feature Importance\n(Stage 2 Regressor, mid-spender)',
+            fontsize=12
+        )
+        axes[0].set_xlim(0, 1.05)
+        axes[0].grid(axis='x', alpha=0.3)
+
+        # Right panel: LIME
+        axes[1].barh(y_pos, lime_norm[::-1], color='#2E86AB', alpha=0.85)
+        axes[1].set_yticks(y_pos)
+        axes[1].set_yticklabels(top_features[::-1], fontsize=10)
+        axes[1].set_xlabel('Normalised |LIME weight|', fontsize=11)
+        axes[1].set_title(
+            'LIME — Feature Importance\n(Local linear approximation, mid-spender)',
+            fontsize=12
+        )
+        axes[1].set_xlim(0, 1.05)
+        axes[1].grid(axis='x', alpha=0.3)
+
+        fig.suptitle(
+            f'SHAP vs LIME Feature Rankings — {champion_name}\n'
+            f'Customer Actual: ${dollar_actual[customer_idx]:,.0f} | '
+            f'Customer Predicted: ${dollar_preds[customer_idx]:,.0f}',
+            fontsize=13, y=1.01
+        )
+        fig.tight_layout()
+        fig.savefig(
+            GRAPHS_DIR / 'shap_vs_lime_comparison.png',
+            bbox_inches='tight', dpi=150
+        )
+        plt.close(fig)
+        logger.info("Plot 8 saved: shap_vs_lime_comparison.png")
+
+    except Exception as e:
+        logger.error(f"SHAP vs LIME comparison plot failed: {e}", exc_info=True)
 
 
 # ===========================================================================
@@ -148,10 +364,11 @@ def evaluate_and_plot(
     y_test_raw: pd.Series,
     segment_thresholds: tuple = None,
     churn_threshold: float = 0.50,
+    X_train: pd.DataFrame = None,
 ) -> None:
     """
     Computes final metrics on log-scale and dollar-scale.
-    Generates all diagnostic plots. Saves all artifacts to config paths.
+    Generates all diagnostic plots (Plots 1-8). Saves all artifacts.
 
     Parameters
     ----------
@@ -162,6 +379,9 @@ def evaluate_and_plot(
     y_test_raw          : original dollar-scale test targets
     segment_thresholds  : (p20, p80) tuple from y_train_raw — stable boundaries
     churn_threshold     : CHURN_THRESHOLD from modeling.py (for calibration plot)
+    X_train             : training feature DataFrame — required for Plot 8
+                          (SHAP vs LIME). Pass X_train from main_execution.ipynb.
+                          If None, Plot 8 is skipped with a log message.
     """
     logger.info("[8/8] Evaluating Business Impact — Dual Scale (v2.3.0)...")
 
@@ -254,7 +474,7 @@ def evaluate_and_plot(
     else:
         eval_df['Cum_Actual']     = eval_df['Actual'].cumsum() / total_actual
         eval_df['Cum_Population'] = np.linspace(0, 1, len(eval_df))
-        
+
         idx_10  = int(len(eval_df) * 0.10)
         lift_10 = eval_df['Cum_Actual'].iloc[idx_10]
         idx_20  = int(len(eval_df) * 0.20)
@@ -276,7 +496,6 @@ def evaluate_and_plot(
             fontsize=10, color='darkgreen',
             arrowprops=dict(arrowstyle='->', color='darkgreen')
         )
-
         ax.annotate(
             f'Top 20% customers\ncapture {lift_20:.0%} of revenue',
             xy=(0.20, lift_20), xytext=(0.28, max(lift_20 - 0.1, 0.05)),
@@ -296,19 +515,15 @@ def evaluate_and_plot(
 
     # -------------------------------------------------------------------
     # Plot 3: Feature Importance — Stage 2 Regressor + Stage 1 Classifier
-    # For TwoStage models: side-by-side importance plots for both stages.
-    # For single-stage models: single importance plot (unchanged behaviour).
     # -------------------------------------------------------------------
     try:
         feature_names = list(X_test.columns) if hasattr(X_test, 'columns') else None
 
-        # Regressor importance (Stage 2 or the full model)
         reg_estimator = model
         if hasattr(model, 'regressor_') and model.regressor_ is not None:
             reg_estimator = model.regressor_
         reg_importances = _get_tree_importances(reg_estimator)
 
-        # Classifier importance (Stage 1, only for TwoStage models)
         clf_importances = None
         if hasattr(model, 'classifier_'):
             clf_importances = _get_tree_importances(model.classifier_)
@@ -319,7 +534,6 @@ def evaluate_and_plot(
             if n_cols == 1:
                 axes = [axes]
 
-            # Stage 2 / full model importance
             fi_reg = (
                 pd.DataFrame({
                     'Feature':    feature_names[:len(reg_importances)],
@@ -336,7 +550,6 @@ def evaluate_and_plot(
             axes[0].set_xlabel('Relative Importance', fontsize=11)
             axes[0].set_ylabel('')
 
-            # Stage 1 classifier importance (TwoStage only)
             if clf_importances is not None and len(axes) > 1:
                 fi_clf = (
                     pd.DataFrame({
@@ -403,8 +616,6 @@ def evaluate_and_plot(
 
     # -------------------------------------------------------------------
     # Plot 5: SHAP Beeswarm Summary
-    # Applied to Stage 2 regressor on spending customers only.
-    # Skipped if shap not installed or model has no tree structure.
     # -------------------------------------------------------------------
     if SHAP_AVAILABLE:
         try:
@@ -415,15 +626,13 @@ def evaluate_and_plot(
             shap_importances = _get_tree_importances(shap_estimator)
 
             if shap_importances is not None:
-                # Focus SHAP on customers the model predicts to spend (most informative)
-                spender_mask  = dollar_preds > 0
-                X_shap        = X_test[spender_mask] if spender_mask.sum() > 20 else X_test
-                actual_shap   = dollar_actual[spender_mask] if spender_mask.sum() > 20 else dollar_actual
+                spender_mask = dollar_preds > 0
+                X_shap       = X_test[spender_mask] if spender_mask.sum() > 20 else X_test
+                actual_shap  = dollar_actual[spender_mask] if spender_mask.sum() > 20 else dollar_actual
 
-                explainer  = shap.TreeExplainer(shap_estimator)
-                shap_vals  = explainer.shap_values(X_shap)   # (n_samples, n_features)
+                explainer = shap.TreeExplainer(shap_estimator)
+                shap_vals = explainer.shap_values(X_shap)
 
-                # Beeswarm summary plot
                 plt.figure(figsize=(12, 8))
                 shap.summary_plot(
                     shap_vals, X_shap,
@@ -441,28 +650,22 @@ def evaluate_and_plot(
 
                 # -----------------------------------------------------------
                 # Plot 6: SHAP Waterfall — Whale / Mid-Spender / Low Spender
-                # Three representative customer profiles showing individual
-                # feature contributions to each prediction.
                 # -----------------------------------------------------------
-                shap_exp = explainer(X_shap)   # Explanation object for waterfall
+                shap_exp = explainer(X_shap)
 
-                # Identify representative customers within X_shap
                 if len(actual_shap) >= 3 and actual_shap.max() > 0:
                     spender_actual = actual_shap[actual_shap > 0]
                     spender_idx    = np.where(actual_shap > 0)[0]
 
-                    # Whale: highest actual spender in shap set
                     whale_local = np.argmax(spender_actual)
                     whale_idx   = spender_idx[whale_local]
 
-                    # Mid: closest to median spend
-                    median_val  = np.median(spender_actual)
-                    mid_local   = np.argmin(np.abs(spender_actual - median_val))
-                    mid_idx     = spender_idx[mid_local]
+                    median_val = np.median(spender_actual)
+                    mid_local  = np.argmin(np.abs(spender_actual - median_val))
+                    mid_idx    = spender_idx[mid_local]
 
-                    # Low: lowest positive spender
-                    low_local   = np.argmin(spender_actual)
-                    low_idx     = spender_idx[low_local]
+                    low_local = np.argmin(spender_actual)
+                    low_idx   = spender_idx[low_local]
 
                     profiles = [
                         (whale_idx, f'Whale Customer\nActual: ${actual_shap[whale_idx]:,.0f}'),
@@ -480,10 +683,8 @@ def evaluate_and_plot(
                         plt.savefig(GRAPHS_DIR / fname, bbox_inches='tight', dpi=150)
                         plt.close()
                         logger.info(f"Plot 6 saved: {fname}")
-
                 else:
                     logger.warning("Insufficient spending customers for waterfall plots.")
-
             else:
                 logger.warning(f"SHAP skipped — '{champion_name}' has no tree structure.")
 
@@ -494,9 +695,6 @@ def evaluate_and_plot(
 
     # -------------------------------------------------------------------
     # Plot 7: Stage 1 Calibration Curve (TwoStage models only)
-    # Shows whether predicted churn probabilities are well-calibrated.
-    # A perfectly calibrated model has points on the diagonal.
-    # Also shows probability distribution with churn threshold marked.
     # -------------------------------------------------------------------
     if hasattr(model, 'classifier_'):
         try:
@@ -509,7 +707,6 @@ def evaluate_and_plot(
 
             fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-            # Calibration curve
             axes[0].plot(mean_pred, fraction_pos, 's-', color='steelblue',
                          lw=2, label='Champion classifier', markersize=6)
             axes[0].plot([0, 1], [0, 1], 'k--', lw=1.5, label='Perfect calibration')
@@ -523,7 +720,6 @@ def evaluate_and_plot(
             axes[0].set_xlim(0, 1)
             axes[0].set_ylim(0, 1)
 
-            # Probability distribution with threshold
             n_spenders   = y_binary_test.sum()
             n_non        = len(y_binary_test) - n_spenders
             above_thresh = (prob_spend >= churn_threshold).sum()
@@ -553,6 +749,26 @@ def evaluate_and_plot(
 
         except Exception as cal_err:
             logger.error(f"Calibration curve failed: {cal_err}", exc_info=True)
+
+    # -------------------------------------------------------------------
+    # Plot 8: SHAP vs LIME Feature Ranking Comparison  [NEW v2.6.0]
+    # Requires X_train to be passed from main_execution.ipynb.
+    # Skipped gracefully if X_train is None or either lib is missing.
+    # -------------------------------------------------------------------
+    if X_train is not None:
+        _shap_vs_lime_comparison_plot(
+            model         = model,
+            X_train       = X_train,
+            X_test        = X_test,
+            dollar_preds  = dollar_preds,
+            dollar_actual = dollar_actual,
+            champion_name = champion_name,
+        )
+    else:
+        logger.info(
+            "Plot 8 (SHAP vs LIME) skipped — pass X_train=X_train to "
+            "evaluate_and_plot() to enable."
+        )
 
     logger.info(f"All evaluation artifacts saved to: {GRAPHS_DIR}")
 

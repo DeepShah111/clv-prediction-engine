@@ -27,6 +27,12 @@ UPGRADED v2.5.0 (Round 6):
      Ensemble appears in leaderboard but is excluded from champion selection
      (no independent CV score).
 
+  NEW v2.6.0 (Upgrade Round 7):
+  7. MLFLOW TRACKING — All 14 model CV scores, params, Dollar R², MAE
+     logged as nested MLflow runs under experiment 'CLV_Pipeline_v2.5.0'.
+     Champion model logged as MLflow artifact via log_champion_to_mlflow().
+     Graceful no-op if mlflow not installed.
+
   ALL v2.4.0 LOGIC RETAINED:
     - Dollar R² eligibility gate (MIN_ELIGIBLE_DOLLAR_R2 = 0.10)
     - CHURN_THRESHOLD = 0.50 with $10 floor
@@ -74,12 +80,27 @@ except ImportError:
     logger.info("CatBoost not installed — Two-Stage (CatBoost) skipped.")
 
 # ---------------------------------------------------------------------------
+# Optional MLflow — graceful degradation if not installed
+# ---------------------------------------------------------------------------
+try:
+    import mlflow
+    import mlflow.sklearn
+    MLFLOW_AVAILABLE = True
+    logger.info("MLflow detected — experiment tracking enabled.")
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    logger.info("mlflow not installed — tracking skipped. Run: pip install mlflow")
+
+MLFLOW_EXPERIMENT = "CLV_Pipeline_v2.5.0"
+mlflow.set_tracking_uri("file:///content/drive/MyDrive/clv-prediction-engine/mlruns")
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MIN_TRAIN_SAMPLES    = 50
-CV_SCORING           = 'neg_mean_absolute_error'
+MIN_TRAIN_SAMPLES      = 50
+CV_SCORING             = 'neg_mean_absolute_error'
 MIN_ELIGIBLE_DOLLAR_R2 = 0.10
-CHURN_THRESHOLD      = 0.50
+CHURN_THRESHOLD        = 0.50
 
 # Models excluded from champion selection — leaderboard reference only
 SELECTION_INELIGIBLE = {'Naive Baseline (Mean)', 'BTYD Statistical Baseline'}
@@ -100,23 +121,6 @@ LOG_PRED_MAX = 12.0
 # Monotone constraints for XGBoost / LightGBM regressors.
 # Order MUST match FEATURE_COLS exactly.
 # +1 = monotone positive, -1 = monotone negative, 0 = unconstrained.
-# Rationale per feature:
-#   Recency          → 0  (higher Recency = longer purchase span, ambiguous)
-#   Frequency        → +1 (more purchases = more likely to purchase again)
-#   Monetary         → +1 (higher avg value = higher future value)
-#   Prob_Pred_Txn    → +1 (BTYD predicted transactions: higher = more spend)
-#   Prob_Pred_Val    → +1 (BTYD predicted value: higher = more spend)
-#   Prob_Alive       → +1 (more alive = more spend)
-#   Interpurchase_Std→ 0  (irregular purchasing is ambiguous)
-#   Purchase_Rate    → +1 (more frequent buyer = more future spend)
-#   Days_Since_Purch → -1 (longer since last purchase = less likely to return)
-#   Revenue_Per_Day  → +1 (higher historical daily revenue = higher future)
-#   Unique_Products  → +1 (broader product engagement = more future spend)
-#   Visit_Diversity  → +1 (more diverse visit dates = more engaged)
-#   Avg_Basket_Size  → 0  (large baskets could be B2B or bulk retail, ambiguous)
-#   Return_Rate      → -1 (more returns = lower future net spend)
-#   Monetary_Pctile  → +1 (higher tier = more future spend)
-#   Max_Single_Order → +1 (large orders = high-value buyer)
 # ---------------------------------------------------------------------------
 _LGBM_MONOTONE = [0, 1, 1, 1, 1, 1, 0, 1, -1, 1, 1, 1, 0, -1, 1, 1]
 
@@ -185,9 +189,6 @@ class TwoStageRegressor(BaseEstimator, RegressorMixin):
         self.classifier_ = clone(self.classifier)
         self.classifier_.fit(X, y_binary)
 
-        # Isotonic calibration using cv='prefit' — learns a monotone mapping
-        # from raw probabilities to calibrated probabilities on the same data.
-        # Slight optimistic bias but necessary given small dataset size (~2700 train).
         try:
             calibrated = CalibratedClassifierCV(
                 FrozenEstimator(self.classifier_), method='isotonic'
@@ -219,23 +220,17 @@ class TwoStageRegressor(BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, X):
-        # Stage 1: calibrated probability of spending
         prob_spend = self.classifier_.predict_proba(X)[:, 1]
 
-        # Stage 2: expected log-scale spend given that customer spends
         if self.regressor_ is None:
             expected_log_amount = np.full(len(prob_spend), self.fallback_spend_)
         else:
             expected_log_amount = np.clip(self.regressor_.predict(X), 0, LOG_PRED_MAX)
 
-        # Combine in DOLLAR-space: E[spend] = P(spend>0) × E[spend | spend>0]
         dollar_amount = np.expm1(expected_log_amount)
         dollar_result = prob_spend * dollar_amount
 
-        # Churn threshold: customers below threshold are confident non-spenders
         dollar_result[prob_spend < CHURN_THRESHOLD] = 0.0
-
-        # Trivial prediction floor: remove sub-$10 noise from borderline cases
         dollar_result[dollar_result < 10.0] = 0.0
 
         return np.log1p(dollar_result)
@@ -252,8 +247,6 @@ class WeightedEnsemble(BaseEstimator, RegressorMixin):
     NOTE: No independent CV score exists for the ensemble since it requires
     all base models to be fitted first. It is evaluated on the test set only
     and is EXCLUDED from champion selection (no CV_MAE_Mean to compare on).
-    Post-hoc: compare ensemble Dollar_R² vs tuned champion Dollar_R² in
-    main_execution.ipynb Cell 4 to decide which model to serialize.
     """
     def __init__(self, fitted_models: list, weights: np.ndarray, model_names: list):
         self.fitted_models = fitted_models
@@ -261,7 +254,6 @@ class WeightedEnsemble(BaseEstimator, RegressorMixin):
         self.model_names   = model_names
 
     def fit(self, X, y):
-        # No-op — base models are already fitted
         return self
 
     def predict(self, X):
@@ -279,6 +271,108 @@ class WeightedEnsemble(BaseEstimator, RegressorMixin):
         for k, v in params.items():
             setattr(self, k, v)
         return self
+
+
+# ===========================================================================
+# MLflow Helpers  [NEW v2.6.0]
+# ===========================================================================
+
+def _log_model_to_mlflow(
+    name: str,
+    params: dict,
+    cv_mae_mean: float,
+    cv_mae_std: float,
+    log_mae: float,
+    log_r2: float,
+    dollar_mae: float,
+    dollar_r2: float,
+    smape: float,
+    wape: float,
+) -> None:
+    """
+    Logs a single model's metrics and params to MLflow as a nested run.
+    Called once per model inside train_and_benchmark(). No-op if mlflow absent.
+    """
+    if not MLFLOW_AVAILABLE:
+        return
+
+    try:
+        with mlflow.start_run(run_name=name, nested=True):
+            # Flatten params to strings — nested dicts break mlflow.log_params
+            safe_params = {k: str(v) for k, v in params.items()}
+            mlflow.log_params(safe_params)
+
+            mlflow.log_metrics({
+                "cv_mae_mean": cv_mae_mean,
+                "cv_mae_std":  cv_mae_std,
+                "log_mae":     log_mae,
+                "log_r2":      log_r2,
+                "dollar_mae":  dollar_mae,
+                "dollar_r2":   dollar_r2,
+                "smape":       smape,
+                "wape":        wape,
+            })
+    except Exception as mlf_err:
+        logger.warning(f"MLflow logging failed for '{name}': {mlf_err}")
+
+
+def log_champion_to_mlflow(
+    tuned_model,
+    champion_name: str,
+    dollar_r2: float,
+    dollar_mae: float,
+    log_r2: float,
+    feature_names: list,
+) -> None:
+    """
+    Logs the final tuned champion model as an MLflow artifact run.
+    Registers under 'CLV_Champion' in the MLflow Model Registry.
+
+    Called from main_execution.ipynb after tune_champion_model() +
+    evaluate_and_plot() so final test-set metrics are available.
+
+    Parameters
+    ----------
+    tuned_model   : fitted champion (post GridSearchCV)
+    champion_name : string model name
+    dollar_r2     : final Dollar R² on test set (from evaluate_and_plot)
+    dollar_mae    : final Dollar MAE on test set (from evaluate_and_plot)
+    log_r2        : final Log R² on test set (from evaluate_and_plot)
+    feature_names : list of feature column names (FEATURE_COLS)
+    """
+    if not MLFLOW_AVAILABLE:
+        logger.info("MLflow not available — champion artifact logging skipped.")
+        return
+
+    try:
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+
+        with mlflow.start_run(run_name=f"CHAMPION_{champion_name}"):
+            mlflow.log_param("champion_name",  champion_name)
+            mlflow.log_param("model_version",  "2.5.0")
+            mlflow.log_param("n_features",     len(feature_names))
+            mlflow.log_param("feature_names",  str(feature_names))
+
+            mlflow.log_metrics({
+                "champion_dollar_r2":  dollar_r2,
+                "champion_dollar_mae": dollar_mae,
+                "champion_log_r2":     log_r2,
+            })
+
+            mlflow.sklearn.log_model(
+                sk_model              = tuned_model,
+                artifact_path         = "champion_model",
+                registered_model_name = "CLV_Champion",
+                input_example         = {f: 0.0 for f in feature_names},
+            )
+
+            logger.info(
+                f"Champion '{champion_name}' logged to MLflow "
+                f"experiment '{MLFLOW_EXPERIMENT}' | Dollar R²: {dollar_r2:.4f}"
+            )
+
+    except Exception as mlf_err:
+        logger.warning(f"Champion MLflow logging failed: {mlf_err}", exc_info=True)
 
 
 # ===========================================================================
@@ -339,7 +433,6 @@ def _build_model_zoo(y_train: pd.Series) -> dict:
     }
 
     if ADVANCED_BOOSTING_AVAILABLE:
-        # XGBoost with monotone constraints on the regressor
         models["XGBoost"] = XGBRegressor(
             objective='reg:squarederror', n_estimators=300, max_depth=4,
             learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
@@ -348,7 +441,6 @@ def _build_model_zoo(y_train: pd.Series) -> dict:
             random_state=RANDOM_SEED, verbosity=0, n_jobs=-1
         )
 
-        # LightGBM with monotone constraints on the regressor
         models["LightGBM"] = LGBMRegressor(
             objective='regression', n_estimators=300, num_leaves=31,
             learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
@@ -432,6 +524,9 @@ def train_and_benchmark(
     v2.5.0 changes:
       - log_preds clipped at LOG_PRED_MAX=12.0 (kills linear model explosion)
       - WeightedEnsemble added post-loop using top-3 by Dollar_R²
+
+    v2.6.0 changes:
+      - Each model run logged to MLflow as nested run under MLFLOW_EXPERIMENT
     """
     logger.info(
         "[6/8] Benchmarking Model Zoo (CV=5, MAE, log-scale — v2.5.0)..."
@@ -447,83 +542,108 @@ def train_and_benchmark(
     models   = _build_model_zoo(y_train)
     results  = []
 
-    # Pre-compute dollar actual for ensemble step
     dollar_actual = np.expm1(y_test.values)
 
-    # Stratified folds for TwoStage models (spender/non-spender ratio preserved)
     y_binary_cv      = (y_train.values > 0).astype(int)
     skf              = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_SEED)
     stratified_folds = list(skf.split(X_train, y_binary_cv))
 
-    for name, model in models.items():
-        try:
-            cv_splitter = (
-                stratified_folds if isinstance(model, TwoStageRegressor)
-                else cv_folds
-            )
-            cv_scores   = cross_val_score(
-                model, X_train, y_train,
-                cv=cv_splitter, scoring=CV_SCORING, n_jobs=-1
-            )
-            cv_mae_mean = -cv_scores.mean()
-            cv_mae_std  =  cv_scores.std()
+    # Start parent MLflow run — all model runs nested inside
+    if MLFLOW_AVAILABLE:
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        parent_run = mlflow.start_run(run_name="benchmark_run")
 
-            model.fit(X_train, y_train)
+    try:
+        for name, model in models.items():
+            try:
+                cv_splitter = (
+                    stratified_folds if isinstance(model, TwoStageRegressor)
+                    else cv_folds
+                )
+                cv_scores   = cross_val_score(
+                    model, X_train, y_train,
+                    cv=cv_splitter, scoring=CV_SCORING, n_jobs=-1
+                )
+                cv_mae_mean = -cv_scores.mean()
+                cv_mae_std  =  cv_scores.std()
 
-            # UPPER CLIP: prevents rogue linear predictions from exploding dollar metrics
-            log_preds = np.clip(model.predict(X_test), a_min=0, a_max=LOG_PRED_MAX)
+                model.fit(X_train, y_train)
 
-            log_mae  = mean_absolute_error(y_test, log_preds)
-            log_rmse = np.sqrt(mean_squared_error(y_test, log_preds))
-            log_r2   = r2_score(y_test, log_preds)
+                log_preds = np.clip(model.predict(X_test), a_min=0, a_max=LOG_PRED_MAX)
 
-            dollar_preds = np.expm1(log_preds)
-            dollar_mae   = mean_absolute_error(dollar_actual, dollar_preds)
-            dollar_rmse  = np.sqrt(mean_squared_error(dollar_actual, dollar_preds))
-            dollar_r2    = r2_score(dollar_actual, dollar_preds)
+                log_mae  = mean_absolute_error(y_test, log_preds)
+                log_rmse = np.sqrt(mean_squared_error(y_test, log_preds))
+                log_r2   = r2_score(y_test, log_preds)
 
-            smape = np.mean(
-                2 * np.abs(dollar_preds - dollar_actual) /
-                (np.abs(dollar_preds) + np.abs(dollar_actual) + 1e-8)
-            ) * 100
+                dollar_preds = np.expm1(log_preds)
+                dollar_mae   = mean_absolute_error(dollar_actual, dollar_preds)
+                dollar_rmse  = np.sqrt(mean_squared_error(dollar_actual, dollar_preds))
+                dollar_r2    = r2_score(dollar_actual, dollar_preds)
 
-            total = np.sum(np.abs(dollar_actual))
-            wape  = (
-                np.sum(np.abs(dollar_actual - dollar_preds)) / total * 100
-                if total > 0 else float('nan')
-            )
+                smape = np.mean(
+                    2 * np.abs(dollar_preds - dollar_actual) /
+                    (np.abs(dollar_preds) + np.abs(dollar_actual) + 1e-8)
+                ) * 100
 
-            results.append({
-                'Model':       name,
-                'Log_MAE':     log_mae,
-                'Log_RMSE':    log_rmse,
-                'Log_R2':      log_r2,
-                'Dollar_RMSE': dollar_rmse,
-                'Dollar_MAE':  dollar_mae,
-                'Dollar_R2':   dollar_r2,
-                'SMAPE':       smape,
-                'WAPE':        wape,
-                'CV_MAE_Mean': cv_mae_mean,
-                'CV_MAE_Std':  cv_mae_std,
-                'Object':      model,
-            })
+                total = np.sum(np.abs(dollar_actual))
+                wape  = (
+                    np.sum(np.abs(dollar_actual - dollar_preds)) / total * 100
+                    if total > 0 else float('nan')
+                )
 
-            logger.info(
-                f"  {name:<35} | "
-                f"Log MAE: {log_mae:.4f} | Log R²: {log_r2:.4f} | "
-                f"$MAE: ${dollar_mae:,.0f} | $R²: {dollar_r2:.4f} | "
-                f"CV MAE: {cv_mae_mean:.4f} ± {cv_mae_std:.4f}"
-            )
+                # --- MLflow: log this model as nested run ---
+                try:
+                    _model_params = model.get_params() if hasattr(model, "get_params") else {}
+                except Exception:
+                    _model_params = {}
+                _log_model_to_mlflow(
+                    name=name,
+                    params=_model_params,
+                    cv_mae_mean=cv_mae_mean,
+                    cv_mae_std=cv_mae_std,
+                    log_mae=log_mae,
+                    log_r2=log_r2,
+                    dollar_mae=dollar_mae,
+                    dollar_r2=dollar_r2,
+                    smape=smape,
+                    wape=wape if not np.isnan(wape) else 0.0,
+                )
 
-        except Exception as e:
-            logger.warning(f"Model '{name}' failed: {e}", exc_info=True)
+                results.append({
+                    'Model':       name,
+                    'Log_MAE':     log_mae,
+                    'Log_RMSE':    log_rmse,
+                    'Log_R2':      log_r2,
+                    'Dollar_RMSE': dollar_rmse,
+                    'Dollar_MAE':  dollar_mae,
+                    'Dollar_R2':   dollar_r2,
+                    'SMAPE':       smape,
+                    'WAPE':        wape,
+                    'CV_MAE_Mean': cv_mae_mean,
+                    'CV_MAE_Std':  cv_mae_std,
+                    'Object':      model,
+                })
+
+                logger.info(
+                    f"  {name:<35} | "
+                    f"Log MAE: {log_mae:.4f} | Log R²: {log_r2:.4f} | "
+                    f"$MAE: ${dollar_mae:,.0f} | $R²: {dollar_r2:.4f} | "
+                    f"CV MAE: {cv_mae_mean:.4f} ± {cv_mae_std:.4f}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Model '{name}' failed: {e}", exc_info=True)
+
+    finally:
+        # Always close parent MLflow run, even if a model errors
+        if MLFLOW_AVAILABLE:
+            mlflow.end_run()
 
     if not results:
         raise RuntimeError("All models failed. Check data quality.")
 
     # -----------------------------------------------------------------------
     # Weighted Ensemble — top-3 by Dollar_R², inverse-MAE weights
-    # Added after individual models are fitted. No CV (test-set evaluation only).
     # -----------------------------------------------------------------------
     eligible_for_ensemble = sorted(
         [r for r in results
@@ -569,7 +689,7 @@ def train_and_benchmark(
             'CV_MAE_Mean': float(np.average(
                 [r['CV_MAE_Mean'] for r in top_k], weights=ens_weights
             )),
-            'CV_MAE_Std':  0.0,   # not applicable — no independent CV
+            'CV_MAE_Std':  0.0,
             'Object':      ensemble,
         })
 
@@ -613,7 +733,7 @@ def train_and_benchmark(
     print(display_df.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
 
     # -----------------------------------------------------------------------
-    # Champion selection: eligible = not baseline, not ensemble, Dollar_R² > 0.10
+    # Champion selection
     # -----------------------------------------------------------------------
     eligible_df = leaderboard_df[
         (~leaderboard_df['Model'].isin(SELECTION_INELIGIBLE)) &
@@ -660,7 +780,6 @@ def tune_champion_model(
     """
     logger.info(f"[7/8] Tuning Champion: {champion_name} (v2.5.0)...")
 
-    # Weighted Ensemble has no hyperparameters — return as-is
     if champion_name == ENSEMBLE_NAME:
         logger.info("Weighted Ensemble selected — no GridSearchCV tuning. Returning as-is.")
         return best_model
@@ -731,7 +850,6 @@ def tune_champion_model(
 
     cv_folds = min(5, max(3, len(X_train) // 10))
 
-    # Use StratifiedKFold for TwoStage models — consistent with train_and_benchmark
     y_binary_cv = (y_train.values > 0).astype(int)
     if isinstance(best_model, TwoStageRegressor):
         skf         = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_SEED)
@@ -763,7 +881,6 @@ def tune_champion_model(
         logger.info(f"No tuning grid for '{champion_name}'. Returning base model.")
         tuned_model = best_model
 
-    # Final evaluation with upper clip
     log_preds     = np.clip(tuned_model.predict(X_test), 0, LOG_PRED_MAX)
     dollar_preds  = np.expm1(log_preds)
     dollar_actual = np.expm1(y_test.values)
