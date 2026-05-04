@@ -92,7 +92,8 @@ except ImportError:
     logger.info("mlflow not installed — tracking skipped. Run: pip install mlflow")
 
 MLFLOW_EXPERIMENT = "CLV_Pipeline_v2.5.0"
-mlflow.set_tracking_uri("file:///content/drive/MyDrive/clv-prediction-engine/mlruns")
+if MLFLOW_AVAILABLE:
+    mlflow.set_tracking_uri("file:///content/drive/MyDrive/clv-prediction-engine/mlruns")
 
 # ---------------------------------------------------------------------------
 # Constants
