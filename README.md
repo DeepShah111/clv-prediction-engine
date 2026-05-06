@@ -1,17 +1,64 @@
 # Enterprise Customer Lifetime Value (CLV) Prediction Engine
 
 <p align="left">
+  <a href="https://clv-deep-shah.streamlit.app" target="_blank">
+    <img src="https://img.shields.io/badge/🚀%20Live%20Demo-Streamlit%20App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white"/>
+  </a>
+  <a href="https://github.com/DeepShah111/clv-prediction-engine" target="_blank">
+    <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github&logoColor=white"/>
+  </a>
+</p>
+
+<p align="left">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/Champion-Two--Stage%20CatBoost-success?style=flat-square"/>
   <img src="https://img.shields.io/badge/Dollar%20R²-0.581-brightgreen?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Top%2020%25%20R²-0.376-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Model%20Zoo-14%20Models-orange?style=flat-square"/>
-  <img src="https://img.shields.io/badge/SHAP-Interpretability-blueviolet?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Status-Portfolio%20Ready-red?style=flat-square"/>
+  <img src="https://img.shields.io/badge/MLflow-Experiment%20Tracked-0194E2?style=flat-square&logo=mlflow&logoColor=white"/>
+  <img src="https://img.shields.io/badge/SHAP%20%2B%20LIME-Interpretability-blueviolet?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Status-Deployed-brightgreen?style=flat-square"/>
 </p>
 
-> A production-structured hybrid pipeline for predicting 90-day customer spend in e-commerce.  
+> A production-structured hybrid pipeline for predicting 90-day customer spend in e-commerce.
 > Combines **BG/NBD probabilistic behavioral modeling** with a **custom Two-Stage Hurdle Regressor** and **isotonic probability calibration** to handle the zero-inflated, heavy-tailed nature of retail CLV distributions.
+
+---
+
+## 🚀 Live Demo
+
+**Try the live app — no installation required:**
+
+👉 **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.app)**
+
+The interactive dashboard allows you to:
+- Adjust customer feature sliders and get real-time 90-day CLV predictions
+- See live SHAP waterfall explanations for each prediction
+- View where a customer falls on the business gain chart
+- Upload a CSV of customers and download batch predictions with segment labels
+
+<p align="center">
+  <img src="assets/streamlit_landing.png" alt="CLV Predictor App — Landing Page" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/streamlit_prediction.png" alt="CLV Predictor App — Live Prediction with SHAP" width="100%"/>
+</p>
+
+---
+
+## 📊 MLflow Experiment Tracking
+
+All 14 models are tracked as nested MLflow runs under the `CLV_Pipeline_v2.5.0` experiment. The tuned champion is registered in the MLflow Model Registry as `CLV_Champion v1`.
+
+**What is logged per model:** CV MAE (mean ± std), Log R², Dollar R², Dollar MAE, SMAPE, WAPE, all hyperparameters, and the serialized champion artifact.
+
+<p align="center">
+  <img src="assets/mlflow_runs.png" alt="MLflow — 15 Training Runs" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/mlflow_champion.png" alt="MLflow — Champion Run Metrics" width="100%"/>
+</p>
 
 ---
 
@@ -62,8 +109,10 @@ By accurately ranking customers by predicted 90-day spend, a business can:
 | Fit probabilistic models on capped data | **BTYD fitted on uncapped data** — capping happens after BG/NBD feature extraction so whale customers receive correct transaction probability estimates |
 | Stratify on raw target | **Stratify on `log1p(target)`** — prevents quintile collapse on zero-heavy distributions |
 | Champion = best CV MAE | **Champion = lowest CV MAE & Dollar R² > 0.10** — filters out models that are statistically correct in log-space but economically useless |
-| No interpretability | **Full SHAP analysis** — beeswarm summary + individual waterfall plots for whale, mid-spender, and low-spender customer profiles |
+| No interpretability | **SHAP + LIME analysis** — beeswarm summary, individual waterfall plots for whale/mid/low profiles, and SHAP vs LIME feature ranking comparison |
 | No probability calibration | **Isotonic calibration on Stage 1 classifier** — corrects CatBoost probability overconfidence so churn threshold fires on genuinely uncertain customers |
+| No experiment tracking | **MLflow tracking** — all 14 models logged with metrics, params, and champion registered in Model Registry |
+| No deployment | **Live Streamlit app** — real-time predictions, SHAP waterfall, batch CSV upload |
 
 ---
 
@@ -141,7 +190,9 @@ Raw CSV (Google Drive)
 │                                     │
 │  GridSearchCV tuning on champion    │
 │  LOG_PRED_MAX = 12.0 clip           │
-│    (prevents linear model explosion)│
+│                                     │
+│  MLflow: all 14 runs logged         │
+│    Champion registered in Registry  │
 └──────────────────┬──────────────────┘
                    │
                    ▼
@@ -152,20 +203,34 @@ Raw CSV (Google Drive)
 │  Segment analysis (4 tiers)         │
 │    thresholds from train set        │
 │                                     │
-│  7 diagnostic artifacts:            │
+│  8 diagnostic artifacts:            │
 │    Plot 1: Accuracy check           │
 │    Plot 2: Business lift (gain)     │
 │    Plot 3: Dual feature importance  │
-│      Stage 2 regressor (purple)     │
-│      Stage 1 classifier (red)       │
 │    Plot 4: Residual analysis        │
 │    Plot 5: SHAP beeswarm summary    │
 │    Plot 6: SHAP waterfall profiles  │
-│      Whale / Mid / Low spender      │
 │    Plot 7: Calibration curve        │
-│      Stage 1 probability dist.      │
+│    Plot 8: SHAP vs LIME comparison  │
 │                                     │
 │  Champion bundle serialized (joblib)│
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│         streamlit_app.py            │
+│                                     │
+│  Deployed: clv-deep-shah.           │
+│    streamlit.app                    │
+│                                     │
+│  Single customer predictor          │
+│    5 sliders → real-time CLV        │
+│    Segment badge with colour coding │
+│    Live SHAP waterfall              │
+│    Gain chart position              │
+│  Batch CSV upload → predictions     │
+│    Segment breakdown table          │
+│    Download enriched CSV            │
 └─────────────────────────────────────┘
 ```
 
@@ -269,6 +334,10 @@ eligible = (~model.isin(BASELINES)) &
 
 The Dollar R² floor ensures the selected champion must explain at least 10% of actual dollar variance — it must have genuine economic predictive power, not just low log-space error on the majority-zero class.
 
+### 4.8 MLflow Experiment Tracking
+
+Every model in the 14-model zoo is logged as a nested MLflow run under the `CLV_Pipeline_v2.5.0` experiment. Metrics logged per run: `cv_mae_mean`, `cv_mae_std`, `log_mae`, `log_r2`, `dollar_mae`, `dollar_r2`, `smape`, `wape`. The tuned champion is registered in the MLflow Model Registry as `CLV_Champion v1` with full artifact serialization. Tracking URI is set to save directly to Google Drive, ensuring runs persist across Colab sessions.
+
 ---
 
 ## 5. Results & Model Leaderboard
@@ -289,7 +358,7 @@ The Dollar R² floor ensures the selected champion must explain at least 10% of 
 | LightGBM | 3.023 | −0.039 | $581 | 84.2% | 159.9% |
 | * Naive Mean Baseline | 3.596 | −0.112 | $686 | 99.4% | 181.4% |
 
-`*` Selection ineligible — reference baselines only  
+`*` Selection ineligible — reference baselines only
 `†` No independent CV — test-set evaluation only, excluded from champion selection
 
 > **On linear models (Ridge, ElasticNet, Linear Regression):** These produce reasonable log-scale metrics but catastrophic dollar-scale metrics (Dollar R² ≈ −19, WAPE > 140%). This is expected and not a code error. A small error in log-space exponentiates into a massive dollar error for high-spend customers. Linear models are architecturally unsuitable for this revenue distribution — they appear in the leaderboard as diagnostic references only.
@@ -354,7 +423,7 @@ DOLLAR-SCALE METRICS (business reporting):
 
 ### SHAP Feature Impact — Global Interpretability
 
-*SHAP beeswarm plot computed on 394 predicted-spending customers using the Stage 2 Regressor. Each dot is one customer. Red = high feature value, Blue = low feature value. Key insights: `Max_Single_Order` high values (red) push predictions strongly positive — the right tail confirms wholesale buyers receive the largest upward push. `Monetary_Percentile` shows clean monotonic behavior — higher tier consistently means higher predicted spend. `Purchase_Rate` has two outlier customers with SHAP > 1.0 — ultra-high-frequency buyers who are significantly underpredicted by the model. `Return_Rate` correctly pushes predictions negative. `Prob_Alive` clusters near zero SHAP — suggesting that given all other behavioral features, the BG/NBD alive probability contributes minimal additional signal.*
+*SHAP beeswarm plot computed on 394 predicted-spending customers using the Stage 2 Regressor. Each dot is one customer. Red = high feature value, Blue = low feature value. Key insights: `Max_Single_Order` high values (red) push predictions strongly positive — the right tail confirms wholesale buyers receive the largest upward push. `Monetary_Percentile` shows clean monotonic behavior — higher tier consistently means higher predicted spend. `Return_Rate` correctly pushes predictions negative. `Prob_Alive` clusters near zero SHAP — suggesting that given all other behavioral features, the BG/NBD alive probability contributes minimal additional signal.*
 
 ![SHAP Summary](artifacts/graphs/shap_summary.png)
 
@@ -386,7 +455,7 @@ DOLLAR-SCALE METRICS (business reporting):
 
 ### Stage 1 Calibration Analysis
 
-*Left: Calibration curve for the Stage 1 classifier (churn vs. return). Points above the diagonal = overconfident (model predicts higher P(spend) than actual). Points below = underconfident. The champion classifier is well-calibrated above P = 0.40 and slightly overconfident at low probabilities (0.0–0.25 range) — low-probability customers get slightly higher spend probability than empirically observed. Right: Probability distribution of P(spend > $0) split by actual spenders (blue) and non-spenders (pink). The churn threshold at 0.50 (red dashed line) captures 394 customers as predicted spenders. The significant overlap between the two distributions in the 0.30–0.60 range is the fundamental ambiguity in this dataset — these are customers whose behavioral signals are genuinely indistinguishable from transactional data alone.*
+*Left: Calibration curve for the Stage 1 classifier (churn vs. return). Points above the diagonal = overconfident (model predicts higher P(spend) than actual). Points below = underconfident. The champion classifier is well-calibrated above P = 0.40 and slightly overconfident at low probabilities (0.0–0.25 range). Right: Probability distribution of P(spend > $0) split by actual spenders (blue) and non-spenders (pink). The churn threshold at 0.50 (red dashed line) captures 394 customers as predicted spenders. The significant overlap between the two distributions in the 0.30–0.60 range is the fundamental ambiguity in this dataset — these are customers whose behavioral signals are genuinely indistinguishable from transactional data alone.*
 
 ![Calibration Curve](artifacts/graphs/calibration_curve.png)
 
@@ -394,7 +463,7 @@ DOLLAR-SCALE METRICS (business reporting):
 
 ### Residual Analysis — Diagnostic
 
-*Left: Residual distribution showing a bimodal structure — a sharp spike at zero (churned customers correctly predicted as $0) and a right-leaning bell for active customers. The mean residual of −0.052 is nearly zero — a significant improvement over earlier versions (previously +0.633), indicating the pipeline no longer has systematic underprediction bias for the spending population. Right: Heteroscedasticity plot —The diagonal band of strongly negative residuals at predicted values 4–8 (bottom-right of scatter) represents churned customers: their actual spend is $0 (log1p(0)=0) but the model assigns a positive predicted spend in the range 4–8 log-units. Residual = 0 − 4..8 = −4..−8, forming an artificial diagonal. This is the churner overprediction problem visible in the segment table (Zero-Spend avg predicted: $151). Whale underprediction appears as the positive residuals at high predicted values (top-right scatter, above the zero line).*
+*Left: Residual distribution showing a bimodal structure — a sharp spike at zero (churned customers correctly predicted as $0) and a right-leaning bell for active customers. The mean residual of −0.052 is nearly zero — a significant improvement over earlier versions (previously +0.633), indicating the pipeline no longer has systematic underprediction bias for the spending population. Right: Heteroscedasticity plot — the diagonal band of strongly negative residuals at predicted values 4–8 represents churned customers whose actual spend is $0 but are assigned positive predicted spend by the model.*
 
 ![Residual Analysis](artifacts/graphs/residual_analysis.png)
 
@@ -426,9 +495,7 @@ Reducing this false-positive rate requires engagement signals not available in t
 
 ### Dataset Scale Constraint
 
-The Online Retail II dataset contains ~4,300 unique customers after cleaning, yielding ~675 test customers. This is the primary ceiling on model performance. The confidence intervals on segment-level R² estimates are wide at this scale — particularly for the Top 20% Spenders segment (N=76), where a handful of extreme whale behaviors drive the entire segment metric.
-
-Three independent Two-Stage model variants (RF, CatBoost, XGBoost) all converge to Dollar R² of 0.43–0.58 on this dataset. This convergence strongly suggests 0.58 is the extractable signal ceiling for this dataset size and feature set — not a tuning problem.
+The Online Retail II dataset contains ~4,300 unique customers after cleaning, yielding ~675 test customers. This is the primary ceiling on model performance. Three independent Two-Stage model variants (RF, CatBoost, XGBoost) all converge to Dollar R² of 0.43–0.58 on this dataset. This convergence strongly suggests 0.58 is the extractable signal ceiling for this dataset size and feature set — not a tuning problem.
 
 The same pipeline architecture on a dataset with 50,000+ customers would realistically achieve Dollar R² of 0.65–0.75, tighter segment estimates, and better calibration for the zero-spend boundary.
 
@@ -437,7 +504,6 @@ The same pipeline architecture on a dataset with 50,000+ customers would realist
 | Extension | Expected Impact |
 |---|---|
 | **FastAPI serving endpoint** — `POST /predict-clv` accepting Customer ID, returning 90-day CLV with confidence interval | Makes the model usable in production retention systems |
-| **MLflow experiment tracking** | Full reproducibility — every training run, hyperparameter set, metric, and artifact version tracked |
 | **Larger dataset** (Instacart, Olist, or enterprise logs — 50k+ customers) | Dollar R² realistically reaches 0.65–0.75 on same architecture |
 | **Engagement feature augmentation** (email open rate, site visit recency, app sessions) | Directly addresses the zero-spend false-positive problem and the low-spender R² |
 | **Held-out calibration set** for Stage 1 | `cv='prefit'` calibrates on training data — a dedicated 10% calibration split would produce more reliable probability estimates |
@@ -450,35 +516,42 @@ The same pipeline architecture on a dataset with 50,000+ customers would realist
 ```
 clv-prediction-engine/
 │
-├── artifacts/                              # Auto-generated — gitignored
+├── assets/                                # README screenshots
+│   ├── streamlit_landing.png
+│   ├── streamlit_prediction.png
+│   ├── mlflow_runs.png
+│   └── mlflow_champion.png
+│
+├── artifacts/
 │   ├── graphs/
-│   │   ├── accuracy_check.png             # Actual vs Predicted (dollar + log scale)
-│   │   ├── business_lift.png              # Gain chart — revenue capture by targeting %
-│   │   ├── feature_importance.png         # Dual stage importance (regressor + classifier)
-│   │   ├── residual_analysis.png          # Residual dist. + heteroscedasticity check
-│   │   ├── shap_summary.png               # SHAP beeswarm — global feature impact
-│   │   ├── shap_waterfall_whale_customer.png  # SHAP waterfall — top spender profile
-│   │   ├── shap_waterfall_mid-spender.png     # SHAP waterfall — median spender
-│   │   ├── shap_waterfall_low_spender.png     # SHAP waterfall — low spender profile
-│   │   ├── calibration_curve.png          # Stage 1 classifier calibration analysis
-│   │   └── segment_metrics.csv            # Segment-level performance table
+│   │   ├── accuracy_check.png
+│   │   ├── business_lift.png
+│   │   ├── feature_importance.png
+│   │   ├── residual_analysis.png
+│   │   ├── shap_summary.png
+│   │   ├── shap_waterfall_whale_customer.png
+│   │   ├── shap_waterfall_mid-spender.png
+│   │   ├── shap_waterfall_low_spender.png
+│   │   ├── calibration_curve.png
+│   │   └── segment_metrics.csv
 │   └── models/
-│       └── clv_champion_bundle.pkl        # Serialized model + feature names + metadata
+│       └── clv_champion_bundle.pkl
 │
 ├── data/
-│   └── online_retail_II.csv               # Source data (Git-ignored)
+│   └── online_retail_II.csv              # Git-ignored
 │
 ├── notebooks/
-│   └── main_execution.ipynb               # Orchestration — Google Colab / VS Code
+│   └── main_execution.ipynb
 │
-├── src/                                   # Modular Python package
+├── src/
 │   ├── __init__.py
-│   ├── config.py                          # Paths, constants, feature list, logging setup
-│   ├── data_ingestion.py                  # Schema validation, cleaning, revenue calc
-│   ├── feature_engineering.py             # BTYD + RFM + behavioral feature pipeline
-│   ├── modeling.py                        # Model zoo, CV, tuning, champion selection
-│   └── evaluation.py                      # Dual-scale metrics, 7 plots, serialization
+│   ├── config.py
+│   ├── data_ingestion.py
+│   ├── feature_engineering.py
+│   ├── modeling.py                       # MLflow tracking
+│   └── evaluation.py                     # SHAP + LIME
 │
+├── streamlit_app.py                      # Live dashboard
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -488,7 +561,13 @@ clv-prediction-engine/
 
 ## 9. Quickstart
 
-### Option A — Google Colab (Recommended)
+### 🌐 Option A — Live App (No Installation)
+
+Visit **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.app)** directly in your browser.
+
+---
+
+### ☁️ Option B — Google Colab (Recommended for Training)
 
 **1. Upload project to Google Drive:**
 ```
@@ -504,38 +583,35 @@ MyDrive/
 
 **3. Install dependencies (Cell 0 — first session only):**
 ```python
-!pip install lifetimes xgboost lightgbm catboost shap --quiet
+!pip install lifetimes xgboost lightgbm catboost shap mlflow lime --quiet
 ```
 
 **4. Run all cells.**
 
-The pipeline mounts Drive, loads the dataset, runs all 8 steps, and saves every artifact — 9 graphs, model bundle, segment CSV, and log file — back to Drive automatically.
+The pipeline mounts Drive, loads the dataset, runs all 8 steps, and saves every artifact — 8 graphs, model bundle, segment CSV, and log file — back to Drive automatically. MLflow runs are saved directly to Drive for local viewing.
 
-> To use a custom Drive path:
-> ```python
-> import os
-> os.environ['CLV_BASE_DIR'] = '/content/drive/MyDrive/your-path-here'
-> ```
+---
 
-### Option B — Local (VS Code / terminal)
+### 💻 Option C — Local (VS Code / Terminal)
 
 ```bash
 # Clone
-git clone https://github.com/your-username/clv-prediction-engine.git
+git clone https://github.com/DeepShah111/clv-prediction-engine.git
 cd clv-prediction-engine
-
-# Virtual environment
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
 
 # Install
 pip install -r requirements.txt
 
-# Place dataset
-# Download Online Retail II from UCI and place at: data/online_retail_II.csv
+# Place dataset at: data/online_retail_II.csv
 
-# Run
+# Run pipeline
 jupyter notebook notebooks/main_execution.ipynb
+
+# Launch Streamlit app
+streamlit run streamlit_app.py
+
+# Launch MLflow UI (separate terminal)
+mlflow ui --port 5000
 ```
 
 ---
@@ -559,16 +635,18 @@ jupyter notebook notebooks/main_execution.ipynb
 
 | Decision | Rationale |
 |---|---|
-| Drop rows with missing Customer ID | ~25% of raw data — guest/POS transactions with no customer history, cannot be attributed to a returnable customer |
-| Exclude negative Quantity rows | Returns — excluded from sales pipeline but captured separately in `Return_Rate` feature |
+| Drop rows with missing Customer ID | ~25% of raw data — guest/POS transactions with no customer history |
+| Exclude negative Quantity rows | Returns — excluded from sales pipeline but captured in `Return_Rate` feature |
 | Exclude zero/negative Price rows | Internal stock transfers and write-offs — not customer revenue events |
-| Deduplicate on `[Invoice, StockCode, Customer ID, InvoiceDate]` | Online Retail II is known to contain duplicate rows that inflate Frequency and TotalAmount |
+| Deduplicate on `[Invoice, StockCode, Customer ID, InvoiceDate]` | Online Retail II contains duplicate rows that inflate Frequency and TotalAmount |
 | Cast Customer ID: `float → Int64 → str` | Raw CSV encodes Customer ID as float due to NaN rows — naive string cast produces `'12345.0'` artifacts |
-| Price dtype: `float64` (not `float32`) | `float32` introduces precision errors on multiplication: `$2.55 × Qty` produces `$2.5499999` — compounds across millions of rows in `TotalAmount` |
+| Price dtype: `float64` (not `float32`) | `float32` introduces precision errors on multiplication — compounds across millions of rows in `TotalAmount` |
 
 ---
 
 <p align="center">
   Built as a portfolio project demonstrating production ML engineering practices.<br/>
-  Structured for correctness, business interpretability, and honest evaluation.
+  Structured for correctness, business interpretability, and honest evaluation.<br/><br/>
+  <a href="https://clv-deep-shah.streamlit.app">🚀 Live Demo</a> &nbsp;|&nbsp;
+  <a href="https://github.com/DeepShah111/clv-prediction-engine">📁 GitHub</a>
 </p>
