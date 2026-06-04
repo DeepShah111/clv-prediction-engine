@@ -1,0 +1,2 @@
+model,optimal_k,silhouette,davies_bouldin,calinski_harabasz,dbscan_n_clusters,dbscan_noise_pct,dbscan_silhouette,gmm_silhouette,hier_silhouette,pca_n_components,pca_variance_explained
+K-Means,2,0.5340249651623306,1.2058480663229787,1552.4703716899505,2,2.0178041543026706,0.7206924406767333,0.37828651314309986,0.6025418453262327,6,0.9676884828262786
