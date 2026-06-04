@@ -1,0 +1,49 @@
+# ===========================================================================
+# .dockerignore — exclude files from Docker build context
+# ===========================================================================
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter / notebooks
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# Data files (large, not needed in container)
+data/
+*.csv
+*.xlsx
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Git
+.git/
+.gitignore
+
+# Tests (not needed in production image)
+tests/
+
+# Development tools
+.vscode/
+.idea/
+*.log
+
+# Streamlit app (API container only needs FastAPI)
+streamlit_app.py
+
+# Docs
+README.md
+assets/

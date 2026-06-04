@@ -1,0 +1,47 @@
+# ===========================================================================
+# docker-compose.yml — Customer Intelligence Platform
+# ===========================================================================
+# Local development and testing setup.
+#
+# Usage:
+#   docker-compose up --build       # build + start
+#   docker-compose up -d            # start in background
+#   docker-compose down             # stop + remove containers
+#   docker-compose logs -f api      # stream logs
+# ===========================================================================
+
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: clv-platform-api
+    ports:
+      - "8000:8000"
+    environment:
+      - CLV_BASE_DIR=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount artifacts at runtime so you can update models without rebuilding
+      - ./artifacts:/app/artifacts:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Optional: Uncomment to add a lightweight reverse proxy
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - api
