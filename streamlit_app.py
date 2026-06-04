@@ -737,7 +737,7 @@ with tab_anomaly:
                 return ""
 
             st.dataframe(
-                top50.style.applymap(_colour_score, subset=["Anomaly_Score"]),
+                top50.style.map(_colour_score, subset=["Anomaly_Score"]),
                 use_container_width=True,
                 height=400,
             )
