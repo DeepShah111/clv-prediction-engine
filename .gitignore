@@ -7,17 +7,13 @@ data/
 # ------------------------------------------------------------------------------
 # 📦 Model Artifacts & Output
 # ------------------------------------------------------------------------------
-# Ignore the main artifacts folder and heavy model files
-artifacts/*
-*.pkl
+artifacts/graphs/anomaly_scores.csv
+# Ignore mlruns and logs only
 *.log
-# EXCEPTION: Allow the graphs folder and the images inside it so the README works!
-!artifacts/graphs/
-!artifacts/graphs/*.png
-!artifacts/graphs/*.jpg
-# EXCEPTION: Allow the champion model bundle for Streamlit Cloud deployment
-!artifacts/models/
-!artifacts/models/clv_champion_bundle.pkl
+mlruns/
+mlflow.db
+
+# Do NOT ignore artifacts/ — all bundles, plots, CSVs needed for Streamlit Cloud
 # ------------------------------------------------------------------------------
 # 🐍 Python Cache & Checkpoints
 # ------------------------------------------------------------------------------
