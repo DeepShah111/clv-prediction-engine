@@ -838,3 +838,5 @@ with tab_anomaly:
             if top_path:
                 st.image(str(top_path), caption="Top 20 Anomalous Customer Profiles",
                          use_container_width=True)
+                
+                
