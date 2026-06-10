@@ -380,9 +380,9 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
     st.markdown("**CLV Tiers**")
-    st.markdown("🐋 **Whale** — at least $1,200")
-    st.markdown("💰 **Mid** — $150 to $1,200")
-    st.markdown("📉 **Low** — up to $150")
+    st.markdown("🐋 **Whale** — highest value")
+    st.markdown("💰 **Mid** — medium value")
+    st.markdown("📉 **Low** — low value")
     st.markdown("💤 **Churned** — zero spend")
 
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
