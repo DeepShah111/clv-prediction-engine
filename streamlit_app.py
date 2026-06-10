@@ -380,15 +380,10 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
     st.markdown("**CLV Tiers**")
-    st.markdown(
-        "<small>"
-        "🐋 Whale ≥ $1,200<br>"
-        "💰 Mid $150 – $1,200<br>"
-        "📉 Low $0.01 – $150<br>"
-        "💤 Churned $0"
-        "</small>",
-        unsafe_allow_html=True,
-    )
+    st.caption("🐋 Whale ≥ $1,200")
+    st.caption("💰 Mid $150 – $1,200")
+    st.caption("📉 Low $0.01 – $150")
+    st.caption("💤 Churned $0")
 
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
     v = clv_bundle.get("version", "?")
@@ -767,7 +762,10 @@ with tab4:
         st.caption("Enter a product name (partial match supported).")
 
         lookup = ar_bundle.get("lookup", {})
-        samples = list(lookup.keys())[:5]
+        # Only show clean single-product keys (not frozensets)
+        clean_samples = [k for k in lookup.keys()
+                         if isinstance(k, str) and not k.startswith("frozenset")][:5]
+        samples = clean_samples
 
         col_in, col_n = st.columns([3, 1])
         with col_in:
