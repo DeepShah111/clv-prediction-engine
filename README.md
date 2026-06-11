@@ -1,4 +1,4 @@
-# Enterprise Customer Lifetime Value (CLV) Prediction Engine
+# 🛍️ Customer Intelligence Platform
 
 <p align="left">
   <a href="https://clv-deep-shah.streamlit.app" target="_blank">
@@ -10,339 +10,310 @@
 </p>
 
 <p align="left">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"/>
-  <img src="https://img.shields.io/badge/Champion-Two--Stage%20CatBoost-success?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Platform-v3.1.0-5C4DB1?style=flat-square"/>
   <img src="https://img.shields.io/badge/Dollar%20R²-0.581-brightgreen?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Model%20Zoo-14%20Models-orange?style=flat-square"/>
-  <img src="https://img.shields.io/badge/MLflow-Experiment%20Tracked-0194E2?style=flat-square&logo=mlflow&logoColor=white"/>
-  <img src="https://img.shields.io/badge/SHAP%20%2B%20LIME-Interpretability-blueviolet?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Models-14%20Supervised%20%2B%2010%20Unsupervised-orange?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Tests-52%2F52%20Passing-brightgreen?style=flat-square"/>
+  <img src="https://img.shields.io/badge/API-FastAPI%20%2B%20Docker-009688?style=flat-square&logo=fastapi"/>
   <img src="https://img.shields.io/badge/Status-Deployed-brightgreen?style=flat-square"/>
 </p>
 
-> A production-structured hybrid pipeline for predicting 90-day customer spend in e-commerce.
-> Combines **BG/NBD probabilistic behavioral modeling** with a **custom Two-Stage Hurdle Regressor** and **isotonic probability calibration** to handle the zero-inflated, heavy-tailed nature of retail CLV distributions.
+> A production-grade **Customer Intelligence Platform** built on the Online Retail II dataset.
+> Combines a **Two-Stage CatBoost CLV predictor** (Dollar R² = 0.581) with **10 unsupervised models**
+> — K-Means, DBSCAN, GMM, Hierarchical, PCA, UMAP, t-SNE, Isolation Forest, PyTorch Autoencoder,
+> and FP-Growth Association Rules — all unified in a single 5-tab Streamlit dashboard with a
+> production FastAPI endpoint, Dockerfile, and 52-test pytest suite.
 
 ---
 
 ## 🚀 Live Demo
 
-**Try the live app — no installation required:**
+**Try the platform — no installation required:**
 
 👉 **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.app)**
 
-The interactive dashboard allows you to:
-- Adjust customer feature sliders and get real-time 90-day CLV predictions
-- See live SHAP waterfall explanations for each prediction
-- View where a customer falls on the business gain chart
-- Upload a CSV of customers and download batch predictions with segment labels
+---
+
+## 📸 Platform Screenshots
+
+### Tab 1 — Unified Customer Intelligence
+*All 5 models run simultaneously on a single customer profile. One click returns CLV prediction, K-Means segment, anomaly score, and business flags.*
 
 <p align="center">
-  <img src="assets/streamlit_landing.png" alt="CLV Predictor App — Landing Page" width="100%"/>
+  <img src="assets/ss1_overview.png" alt="Platform Overview" width="100%"/>
 </p>
 
 <p align="center">
-  <img src="assets/streamlit_prediction.png" alt="CLV Predictor App — Live Prediction with SHAP" width="100%"/>
+  <img src="assets/ss2_intelligence_hero.png" alt="Intelligence Report — CLV + Segment + Anomaly" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/ss3_shap.png" alt="SHAP Waterfall + Feature Profile" width="100%"/>
 </p>
 
 ---
 
-## 📊 MLflow Experiment Tracking
-
-All 14 models are tracked as nested MLflow runs under the `CLV_Pipeline_v2.5.0` experiment. The tuned champion is registered in the MLflow Model Registry as `CLV_Champion v1`.
-
-**What is logged per model:** CV MAE (mean ± std), Log R², Dollar R², Dollar MAE, SMAPE, WAPE, all hyperparameters, and the serialized champion artifact.
+### Tab 2 — Segmentation Lab
+*Statistical k-selection proof: tested k=2,3,4,5 with composite scoring across Silhouette, Davies-Bouldin, and Calinski-Harabasz. k=2 wins objectively.*
 
 <p align="center">
-  <img src="assets/mlflow_runs.png" alt="MLflow — 15 Training Runs" width="100%"/>
+  <img src="assets/ss4_k_selection.png" alt="K-Selection Analysis — k=2..5" width="100%"/>
 </p>
 
 <p align="center">
-  <img src="assets/mlflow_champion.png" alt="MLflow — Champion Run Metrics" width="100%"/>
+  <img src="assets/ss5_segments.png" alt="UMAP Cluster Map + Segment Profiles" width="100%"/>
+</p>
+
+---
+
+### Tab 3 — Anomaly Detection
+*Isolation Forest + PyTorch Autoencoder ensemble. 128 customers flagged (3.8%) across 3,370 analysed.*
+
+<p align="center">
+  <img src="assets/ss6_anomaly.png" alt="Anomaly Detection Dashboard" width="100%"/>
+</p>
+
+---
+
+### Tab 4 — Product Intelligence
+*FP-Growth association rules on 400K transactions. 94 rules, avg lift 9.42×. Live cross-sell recommendation engine.*
+
+<p align="center">
+  <img src="assets/ss7_crosssell.png" alt="Cross-Sell Recommendation Engine" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/ss8_ar_plots.png" alt="Association Rules — Lift Heatmap + Top Rules" width="100%"/>
+</p>
+
+---
+
+### Tab 5 — Batch Operations + API + Tests
+
+<p align="center">
+  <img src="assets/ss9_batch.png" alt="Batch Operations" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/ss10_fastapi.png" alt="FastAPI Swagger Docs" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="assets/ss11_pytest_png.jpg" alt="pytest — 52/52 Passing" width="100%"/>
 </p>
 
 ---
 
 ## Table of Contents
 
-1. [The Business Problem](#1-the-business-problem)
-2. [What Makes This Different](#2-what-makes-this-different)
-3. [Pipeline Architecture](#3-pipeline-architecture)
-4. [Technical Decisions & Rationale](#4-technical-decisions--rationale)
-5. [Results & Model Leaderboard](#5-results--model-leaderboard)
-6. [Visual Evidence](#6-visual-evidence)
-7. [Honest Limitations & What I Would Do Next](#7-honest-limitations--what-i-would-do-next)
-8. [Repository Structure](#8-repository-structure)
-9. [Quickstart](#9-quickstart)
-10. [Dataset](#10-dataset)
+1. [What This Platform Does](#1-what-this-platform-does)
+2. [Architecture Overview](#2-architecture-overview)
+3. [Supervised Learning — CLV Prediction](#3-supervised-learning--clv-prediction)
+4. [Unsupervised Learning — All 10 Models](#4-unsupervised-learning--all-10-models)
+5. [Model Leaderboard](#5-model-leaderboard)
+6. [Key Configuration Variables](#6-key-configuration-variables)
+7. [Technical Decisions & Rationale](#7-technical-decisions--rationale)
+8. [Diagnostic Plots](#8-diagnostic-plots)
+9. [Repository Structure](#9-repository-structure)
+10. [Quickstart](#10-quickstart)
+11. [API Reference](#11-api-reference)
+12. [Dataset](#12-dataset)
+13. [Honest Limitations](#13-honest-limitations)
 
 ---
 
-## 1. The Business Problem
+## 1. What This Platform Does
 
-In e-commerce, the single most valuable piece of information a business can have is: **which customers will generate the most revenue over the next 90 days?**
+In e-commerce, two questions drive the most revenue decisions:
 
-This is not a simple regression problem. Retail transaction data is structurally hostile to standard ML approaches for two compounding reasons:
+1. **Which customers will spend the most in the next 90 days?** → Supervised CLV prediction
+2. **Which customers are behaving unusually or buying together?** → Unsupervised intelligence
 
-| Challenge | Why It Breaks Standard ML |
-|---|---|
-| **Zero inflation** | 40–50% of customers make no purchase in any given 90-day window. A standard regressor minimizes MSE across all customers — it learns to predict near-zero for everyone because that minimizes loss on the majority class. Correctly predicting a $0 is economically valuable, but standard regression conflates it with noise. |
-| **Heavy-tailed revenue distribution** | The top 20% of customers generate ~65% of total revenue. A model that performs well on average customers but fails on high-value "whales" is almost useless for retention budget allocation. The error distribution is not symmetric — a $5,000 underprediction costs more than a $5,000 overprediction. |
+This platform answers both — not as separate notebooks, but as a unified production system
+where every model feeds into a single customer view.
 
-By accurately ranking customers by predicted 90-day spend, a business can:
-- **Concentrate retention spend** on the customers who will generate the most return
-- **Suppress marketing** toward customers the model identifies as churned — eliminating wasted outreach budget
-- **Prioritize VIP service tiers** for customers flagged as high-future-value before their next purchase
-- **Identify B2B wholesale buyers** from their order history before they defect to a competitor
-
----
-
-## 2. What Makes This Different
-
-| What a standard ML regression project does | What this pipeline does |
-|---|---|
-| Single train/test split on random rows | **Temporal split on a single anchor date** — train on past, predict future. No transaction from the prediction window contaminates feature computation. |
-| One or two models | **14-model zoo** including baselines, tree ensembles, boosting variants, Two-Stage Hurdle variants, and a Weighted Ensemble — all benchmarked under identical CV conditions |
-| Standard regression on all customers | **Custom Two-Stage Hurdle Regressor** — Stage 1 classifies churn probability, Stage 2 regresses expected spend on spenders only. Architecturally correct for zero-inflated targets. |
-| Combine log-space predictions naively | **Dollar-space combination** — `E[spend] = P(spend>0) × E[spend\|spend>0]`. Mathematically correct. The previous incorrect log-space version produced avg predicted $182 vs avg actual $761. |
-| RFM features only | **16-feature hybrid set**: core RFM + BG/NBD probabilistic outputs + 5 behavioral consistency features + 2 engineered whale-detection features |
-| Compute percentile features on full dataset | **Leakage-free `Monetary_Percentile`** — test customers' percentiles derived from training distribution via `searchsorted`, not rank on the combined set |
-| Fit probabilistic models on capped data | **BTYD fitted on uncapped data** — capping happens after BG/NBD feature extraction so whale customers receive correct transaction probability estimates |
-| Stratify on raw target | **Stratify on `log1p(target)`** — prevents quintile collapse on zero-heavy distributions |
-| Champion = best CV MAE | **Champion = lowest CV MAE & Dollar R² > 0.10** — filters out models that are statistically correct in log-space but economically useless |
-| No interpretability | **SHAP + LIME analysis** — beeswarm summary, individual waterfall plots for whale/mid/low profiles, and SHAP vs LIME feature ranking comparison |
-| No probability calibration | **Isotonic calibration on Stage 1 classifier** — corrects CatBoost probability overconfidence so churn threshold fires on genuinely uncertain customers |
-| No experiment tracking | **MLflow tracking** — all 14 models logged with metrics, params, and champion registered in Model Registry |
-| No deployment | **Live Streamlit app** — real-time predictions, SHAP waterfall, batch CSV upload |
+| Business Question | Model | Output |
+|---|---|---|
+| How much will this customer spend in 90 days? | Two-Stage CatBoost | Dollar CLV + confidence range |
+| What type of customer are they behaviorally? | K-Means + DBSCAN + GMM + Hierarchical | Segment name + profile |
+| Is this customer behaving anomalously? | Isolation Forest + Autoencoder | Anomaly score [0–1] + risk flags |
+| What products should we recommend to them? | FP-Growth Association Rules | Top-N cross-sell recommendations |
+| Which customers are worth retaining in bulk? | Batch scoring pipeline | Full CSV with CLV + segment + anomaly |
 
 ---
 
-## 3. Pipeline Architecture
+## 2. Architecture Overview
 
 ```
-Raw CSV (Google Drive)
+Raw CSV (Online Retail II — 1M+ transactions)
         │
         ▼
-┌─────────────────────────────────────┐
-│         data_ingestion.py           │
-│  Schema validation (fail-fast)      │
-│  NaN audit → Customer ID cast       │
-│  Returns exclusion (Quantity < 0)   │
-│  Deduplication on invoice key       │
-│  TotalAmount = Qty × Price (f64)    │
-│  Price dtype: float64 (precision)   │
-└──────────────────┬──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│       feature_engineering.py        │
-│                                     │
-│  Temporal split on single anchor:   │
-│    split_date = max_date − 90 days  │
-│    train_txns  → before split_date  │
-│    test_txns   → from split_date    │
-│    observation_period_end=split_date│
-│                                     │
-│  Stage 1 : RFM (lifetimes)          │
-│  Stage 2 : 9 behavioral features    │
-│  Stage 3 : BG/NBD + Gamma-Gamma     │
-│    (fitted on train only)           │
-│  Stage 4 : Target variable (raw $)  │
-│  Stage 5 : Stratified 80/20 split   │
-│    on log1p(y) — not raw y          │
-│  Stage 5b: Leakage-free             │
-│    Monetary_Percentile              │
-│    (searchsorted on train dist.)    │
-│  Stage 6 : log1p target transform   │
-│  Stage 7 : BTYD feature extraction  │
-│    on uncapped data                 │
-│  Stage 8 : Outlier caps             │
-│    (AFTER BTYD — no whale bias)     │
-└───────┬─────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────┐
-│           modeling.py               │
-│                                     │
-│  14-model zoo:                      │
-│    * Naive Mean Baseline (ref)      │
-│    * BTYD Statistical Baseline(ref) │
-│    Linear · Ridge · ElasticNet      │
-│    Random Forest · CatBoost         │
-│    XGBoost · LightGBM               │
-│    Two-Stage RF                     │
-│    Two-Stage XGBoost                │
-│    Two-Stage LightGBM               │
-│    Two-Stage CatBoost (champion)    │
-│    † Weighted Ensemble (ref)        │
-│                                     │
-│  CV: 5-fold KFold                   │
-│  TwoStage: pre-computed             │
-│    StratifiedKFold on binary labels │
-│                                     │
-│  TwoStage Stage 1: isotonic         │
-│    calibration (CalibratedCVCV)     │
-│                                     │
-│  XGB/LGB: monotone constraints      │
-│    (domain-consistent feature dirs) │
-│                                     │
-│  Champion = lowest CV MAE &         │
-│    Dollar R² > 0.10                 │
-│                                     │
-│  GridSearchCV tuning on champion    │
-│  LOG_PRED_MAX = 12.0 clip           │
-│                                     │
-│  MLflow: all 14 runs logged         │
-│    Champion registered in Registry  │
-└──────────────────┬──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│          evaluation.py              │
-│                                     │
-│  Log-scale + Dollar-scale metrics   │
-│  Segment analysis (4 tiers)         │
-│    thresholds from train set        │
-│                                     │
-│  8 diagnostic artifacts:            │
-│    Plot 1: Accuracy check           │
-│    Plot 2: Business lift (gain)     │
-│    Plot 3: Dual feature importance  │
-│    Plot 4: Residual analysis        │
-│    Plot 5: SHAP beeswarm summary    │
-│    Plot 6: SHAP waterfall profiles  │
-│    Plot 7: Calibration curve        │
-│    Plot 8: SHAP vs LIME comparison  │
-│                                     │
-│  Champion bundle serialized (joblib)│
-└──────────────────┬──────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│         streamlit_app.py            │
-│                                     │
-│  Deployed: clv-deep-shah.           │
-│    streamlit.app                    │
-│                                     │
-│  Single customer predictor          │
-│    5 sliders → real-time CLV        │
-│    Segment badge with colour coding │
-│    Live SHAP waterfall              │
-│    Gain chart position              │
-│  Batch CSV upload → predictions     │
-│    Segment breakdown table          │
-│    Download enriched CSV            │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                 data_ingestion.py                   │
+│  Schema validation · NaN audit · Returns exclusion  │
+│  Deduplication · TotalAmount = Qty × Price (f64)    │
+└────────────────────────┬────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│               feature_engineering.py                │
+│                                                     │
+│  Temporal split:  split_date = max_date − 90 days   │
+│  ├── RFM features (lifetimes)                       │
+│  ├── 9 behavioral features                          │
+│  ├── BG/NBD + Gamma-Gamma (train only)              │
+│  ├── Leakage-free Monetary_Percentile               │
+│  └── 16-feature hybrid output                       │
+└──────────────┬──────────────────┬───────────────────┘
+               │                  │
+               ▼                  ▼
+┌──────────────────┐   ┌──────────────────────────────┐
+│   modeling.py    │   │      segmentation.py          │
+│                  │   │  segmentation.py              │
+│  14-model zoo    │   │  K-Means · DBSCAN · GMM       │
+│  Two-Stage       │   │  Hierarchical · PCA           │
+│  CatBoost        │   │  UMAP · t-SNE                 │
+│  Champion        │   │                               │
+│  Dollar R²=0.581 │   │      anomaly.py               │
+│                  │   │  Isolation Forest             │
+│   evaluation.py  │   │  PyTorch Autoencoder          │
+│  SHAP + LIME     │   │                               │
+│  8 diagnostic    │   │   association_rules.py        │
+│  plots           │   │  FP-Growth · 94 rules         │
+│                  │   │  9.42× avg lift               │
+└──────────────────┘   └──────────────────────────────┘
+               │                  │
+               └────────┬─────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│              streamlit_app.py  (v3.1.0)             │
+│                                                     │
+│  Tab 1 — Unified Customer Intelligence              │
+│  Tab 2 — Segmentation Lab                           │
+│  Tab 3 — Anomaly Detection                          │
+│  Tab 4 — Product Intelligence                       │
+│  Tab 5 — Batch Operations                           │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│                  api/main.py (FastAPI)               │
+│  POST /predict-clv · POST /segment-customer         │
+│  POST /detect-anomaly · GET /health                 │
+└─────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4. Technical Decisions & Rationale
+## 3. Supervised Learning — CLV Prediction
 
-### 4.1 Why a Two-Stage Hurdle Model?
+### Why a Two-Stage Hurdle Model?
 
-Standard regressors minimize MSE across all customers — but on a zero-inflated distribution, the majority-zero customers dominate the loss function and the model learns to predict near-zero for everyone. This systematically underestimates high-value customers.
+Retail CLV data has two structural problems that break standard regression:
 
-The Two-Stage (Hurdle) architecture separates the problem correctly into two distinct sub-problems:
-
-```
-Stage 1 — Binary classifier:  P(customer will spend > $0 in next 90 days)
-Stage 2 — Regressor on spenders only:  E[log1p(spend) | spend > 0]
-
-Final prediction = P(spend>0) × expm1(E[log1p(spend) | spend>0])
-```
-
-The critical implementation detail is that the combination happens in **dollar-space**, not log-space. This is a mathematically non-trivial distinction:
-
-```
-CORRECT:  E[spend] = P(spend>0) × E[spend | spend>0]          ← dollar-space
-WRONG:    log(E[spend]) = P(spend>0) × log(E[spend|spend>0])  ← log-space
-```
-
-An earlier version of this pipeline combined in log-space. A probability of 0.6 multiplied by a log-scale prediction of 4.0 produces 2.4 — but `expm1(2.4) = $10` while `0.6 × expm1(4.0) = $32`. The log-space error compresses every prediction by the exponent of the probability, which explained why average predicted spend was $182 against average actual spend of $761. The dollar-space fix reduced SMAPE from 126% to 82%.
-
-### 4.2 BTYD Probabilistic Features
-
-The `lifetimes` library implements the **Beta-Geometric/Negative Binomial (BG/NBD)** model for purchase frequency and the **Gamma-Gamma** model for monetary value. These are fitted on training data only and applied as pure feature transformers — no test data ever touches the model fitting step.
-
-| Feature | Model | What It Captures |
+| Problem | Impact | Solution |
 |---|---|---|
-| `Prob_Alive` | BG/NBD | P(customer has not permanently churned as of split_date) |
-| `Prob_Pred_Txn` | BG/NBD | Expected number of purchases in the next 90-day window |
-| `Prob_Pred_Val` | Gamma-Gamma | Expected average order value conditional on repeat purchase |
+| **Zero inflation** | 40–50% of customers spend $0. Standard regressors learn to predict near-zero for everyone. | Stage 1 binary classifier separates churners from spenders |
+| **Heavy-tailed revenue** | Top 20% generate ~65% of revenue. A model wrong on whales is useless for retention. | Stage 2 regressor trained on spenders only, with whale-detection features |
 
-These features encode **distributional purchase behavior** that RFM cannot capture. A customer with Frequency=3, Recency=180 days is statistically very different from one with Frequency=3, Recency=5 days — the BG/NBD model quantifies exactly how different by computing the probability that each customer has permanently defected versus temporarily lapsed.
+```
+Stage 1:  P(customer will spend > $0 in next 90 days)     [CatBoost Classifier]
+Stage 2:  E[log1p(spend) | spend > 0]                     [CatBoost Regressor]
 
-A critical implementation detail: BGF and GGF are fitted on **uncapped** Frequency and Monetary values. Capping occurs only after BTYD feature extraction is complete. Fitting on capped data would systematically underestimate `Prob_Pred_Txn` for wholesale buyers (Frequency > P99), which are precisely the customers who drive the most future revenue.
+Final:    E[spend] = P(spend>0) × expm1(E[log1p(spend)|spend>0])
+                     ↑ dollar-space combination — mathematically correct
+```
 
-### 4.3 Whale-Detection Feature Engineering
+### The 16 Features
 
-Two features were engineered specifically to identify high-value B2B wholesale buyers — the customers whose CLV is largest but hardest to predict from average-based features:
-
-| Feature | Definition | Why It Matters |
+| Feature | Category | What It Captures |
 |---|---|---|
-| `Max_Single_Order` | Largest single invoice value in train window | A customer with avg order $54 but one $4,500 order is a wholesale buyer. The `Monetary` average ($54) completely misses this signal. `Max_Single_Order` ($4,500) correctly identifies them as capable of large future purchases. |
-| `Monetary_Percentile` | Customer's position in **training** spend distribution (0–1) | Gives tree models a stable ordinal signal of customer tier without sensitivity to outlier absolute scale. Computed via `searchsorted` against sorted train values — test customers are assigned percentiles anchored on training distribution only, matching real deployment conditions. |
-
-The SHAP waterfall for the Whale Customer (Actual: $26,721) shows `Max_Single_Order = 3,685` contributing +0.78 log-units — the single largest individual feature contribution to any prediction in the test set. This empirically validates the design hypothesis.
-
-### 4.4 Temporal Split Design
-
-A random train/test split on transaction data is a **leakage error** — future transactions contaminate feature computation. This pipeline uses a strict temporal split anchored on a single date:
-
-```python
-split_date  = max_date − 90 days
-train_txns  = df[df['InvoiceDate'] <  split_date]   # historical behavior
-test_txns   = df[df['InvoiceDate'] >= split_date]    # ground truth spend
-observation_period_end = split_date                  # RFM anchor
-```
-
-Both the RFM observation period and the prediction window start from this same anchor. An earlier version used two independent boundary dates — `train_end` at 75% of the timeline and `test_start` at `max_date − 90d` — which created a floating gap between feature computation end and prediction window start. This corrupted `T` (customer age) and `Recency` because they were computed relative to a different reference point than where prediction began.
-
-### 4.5 Isotonic Probability Calibration
-
-Tree ensemble classifiers are known to produce overconfident probability estimates — a CatBoost classifier may assign P(spend) = 0.85 to customers where the true empirical probability is 0.65. This matters because the Stage 1 churn threshold (0.50) fires based on raw probabilities.
-
-Isotonic calibration fits a monotone step function mapping raw probabilities to calibrated probabilities using the training data. The calibration curve (Plot 7) shows the result: the classifier is well-calibrated above P = 0.40, with slight overconfidence in the 0.0–0.25 range — meaning low-probability customers get slightly higher spend probability than they should, explaining why zero-spend customers still receive non-zero predictions.
-
-### 4.6 Monotone Constraints on Gradient Boosting
-
-XGBoost and LightGBM regressors enforce domain-consistent monotone relationships. If a customer's `Frequency` increases, their predicted spend must not decrease. If `Return_Rate` increases, predicted spend must not increase.
-
-```
-+1 (must increase with feature): Frequency, Monetary, Prob_Pred_Txn,
-   Prob_Pred_Val, Prob_Alive, Purchase_Rate, Revenue_Per_Day,
-   Unique_Products, Visit_Diversity, Monetary_Percentile, Max_Single_Order
-
--1 (must decrease with feature): Days_Since_Purchase, Return_Rate
-
- 0 (unconstrained): Recency, Interpurchase_Std, Avg_Basket_Size
-```
-
-These constraints encode domain knowledge — they act as a regularizer preventing the model from learning spurious relationships that happen to reduce training loss but don't reflect real customer behavior.
-
-### 4.7 Champion Selection Criterion
-
-Models are ranked by 5-fold CV MAE on log-scale targets. But CV MAE alone is insufficient for this problem. A Two-Stage model that correctly assigns $0 to all churners will achieve very low CV MAE — because the zero-spend majority pulls the log-scale mean down and predicting zero for everyone is "cheap" in log-space. This can produce negative Dollar R² while winning on CV MAE.
-
-The eligibility filter requires:
-
-```python
-eligible = (~model.isin(BASELINES)) &
-           (model != ENSEMBLE_NAME) &
-           (Dollar_R2 > 0.10)
-```
-
-The Dollar R² floor ensures the selected champion must explain at least 10% of actual dollar variance — it must have genuine economic predictive power, not just low log-space error on the majority-zero class.
-
-### 4.8 MLflow Experiment Tracking
-
-Every model in the 14-model zoo is logged as a nested MLflow run under the `CLV_Pipeline_v2.5.0` experiment. Metrics logged per run: `cv_mae_mean`, `cv_mae_std`, `log_mae`, `log_r2`, `dollar_mae`, `dollar_r2`, `smape`, `wape`. The tuned champion is registered in the MLflow Model Registry as `CLV_Champion v1` with full artifact serialization. Tracking URI is set to save directly to Google Drive, ensuring runs persist across Colab sessions.
+| `Recency` | Core RFM | Days since first purchase |
+| `Frequency` | Core RFM | Number of invoices |
+| `Monetary` | Core RFM | Average order value |
+| `Prob_Pred_Txn` | BG/NBD | Expected transactions in next 90 days |
+| `Prob_Pred_Val` | Gamma-Gamma | Expected avg order value |
+| `Prob_Alive` | BG/NBD | P(customer has not permanently churned) |
+| `Interpurchase_Std` | Behavioral | Consistency of purchase timing |
+| `Purchase_Rate` | Behavioral | Purchases per day |
+| `Days_Since_Purchase` | Behavioral | Days since last transaction |
+| `Revenue_Per_Day` | Behavioral | Revenue per active day |
+| `Unique_Products` | Behavioral | Breadth of product engagement |
+| `Visit_Diversity` | Behavioral | Unique purchase dates |
+| `Avg_Basket_Size` | Behavioral | Average items per order |
+| `Return_Rate` | Behavioral | Fraction of orders returned |
+| `Monetary_Percentile` | Whale Detection | Customer tier rank (leakage-free) |
+| `Max_Single_Order` | Whale Detection | Largest single invoice value |
 
 ---
 
-## 5. Results & Model Leaderboard
+## 4. Unsupervised Learning — All 10 Models
 
-### 5.1 Full Model Leaderboard — v2.5.0
+### Customer Segmentation (7 models)
+
+| Model | Purpose | Key Output |
+|---|---|---|
+| **K-Means** (primary) | Customer segmentation | k=2 optimal — Champions vs Loyal Customers |
+| **DBSCAN + Optuna** | Noise-aware clustering | 2.4% noise points identified |
+| **GMM** | Probabilistic soft clustering | Cluster membership probabilities |
+| **Hierarchical** | Dendrogram analysis | Visual cluster hierarchy |
+| **PCA** | Dimensionality reduction | 6 components, 96.8% variance explained |
+| **UMAP** | 2D non-linear visualization | Cluster separation map |
+| **t-SNE** | 2D manifold visualization | Local structure preservation |
+
+**K-Selection Results** — tested k=2,3,4,5 with composite scoring:
+
+| k | Silhouette | Davies-Bouldin | Calinski-H | Composite | |
+|---|---|---|---|---|---|
+| **2** | **0.5315** | **1.2060** | **1,549** | **0.7624** | ◄ OPTIMAL |
+| 3 | 0.4000 | 1.2137 | 1,355 | 0.1548 | |
+| 4 | 0.3662 | 1.1415 | 1,333 | 0.1504 | |
+| 5 | 0.3542 | 1.0588 | 1,355 | 0.2761 | |
+
+Composite score = 50% Silhouette + 25% (1 − Davies-Bouldin normalized) + 25% Calinski-Harabasz normalized.
+Silhouette drops 0.53 → 0.35 as k increases — splitting further creates noise, not insight.
+
+**Segment Business Summary:**
+
+| Segment | N | Avg CLV | Total CLV | Revenue Share |
+|---|---|---|---|---|
+| 🐋 Loyal Customers | 110 | $2,342.59 | $257,685 | **71.6%** |
+| 👥 Champions | 565 | $180.98 | $102,252 | 28.4% |
+
+### Anomaly Detection (2 models)
+
+| Model | Architecture | Role |
+|---|---|---|
+| **Isolation Forest** | 200 trees, contamination=5% | Primary anomaly scorer — fast, no distributional assumptions |
+| **PyTorch Autoencoder** | Encoder 12→64→32→16→8, Decoder 8→16→32→64→12 | Deep reconstruction-error scorer |
+
+**Ensemble:** `score = 0.45 × IF_score + 0.55 × AE_score`
+
+**Business flags:**
+- `is_anomaly` — combined score ≥ 0.50
+- `is_high_return` — Return_Rate > 0.30 AND score > 0.40
+- `is_whale_anomaly` — Monetary_Percentile > 90 AND anomaly
+- `is_suspicious` — high_return + anomaly + Recency < 30 days
+
+**Results:** 128 / 3,370 customers flagged (3.8%) | Avg IF lift: 9.42× above random
+
+### Market Basket Analysis (1 model)
+
+| Model | Algorithm | Output |
+|---|---|---|
+| **FP-Growth** | mlxtend `fpgrowth` + co-occurrence fallback | 94 association rules, 41 products with recommendations |
+
+**Key metrics:** Avg lift 9.42× | Max lift 22.83× | Min support 2% | Min confidence 20%
+
+Top rule example: `GARDENERS KNEELING PAD CUP OF TEA → GARDENERS KNEELING PAD KEEP CALM` — lift 22.83×
+
+---
+
+## 5. Model Leaderboard
+
+### CLV Prediction — Full Leaderboard (v2.5.0)
 
 | Model | CV MAE | Dollar R² | Dollar MAE | WAPE | SMAPE |
 |:---|:---:|:---:|:---:|:---:|:---:|
@@ -358,212 +329,307 @@ Every model in the 14-model zoo is logged as a nested MLflow run under the `CLV_
 | LightGBM | 3.023 | −0.039 | $581 | 84.2% | 159.9% |
 | * Naive Mean Baseline | 3.596 | −0.112 | $686 | 99.4% | 181.4% |
 
-`*` Selection ineligible — reference baselines only
-`†` No independent CV — test-set evaluation only, excluded from champion selection
+`*` Reference baselines — ineligible for champion selection
+`†` No independent CV — excluded from champion selection
 
-> **On linear models (Ridge, ElasticNet, Linear Regression):** These produce reasonable log-scale metrics but catastrophic dollar-scale metrics (Dollar R² ≈ −19, WAPE > 140%). This is expected and not a code error. A small error in log-space exponentiates into a massive dollar error for high-spend customers. Linear models are architecturally unsuitable for this revenue distribution — they appear in the leaderboard as diagnostic references only.
-
-> **On the Weighted Ensemble:** The ensemble combines predictions from the top-3 models by Dollar R² using inverse-MAE weights. It achieves competitive Dollar R² (0.570) but has SMAPE of 153% — averaging log-space predictions from models with very different prediction profiles amplifies errors for mid-range customers. It is excluded from champion selection because it has no independent cross-validation score. Selecting a model on test-set performance is model selection bias.
-
-### 5.2 Champion Model — Final Test-Set Report
-
-**Champion: Two-Stage (CatBoost) | Test customers: 675**
+### Champion — Final Test-Set Report
 
 ```
-LOG-SCALE METRICS (model optimisation target):
-  Log-RMSE  :  3.4018
-  Log-MAE   :  2.1615
-  Log-R²    : −0.0610   ← see Section 7 for full explanation
+Champion: Two-Stage (CatBoost) | Test customers: 675
 
-DOLLAR-SCALE METRICS (business reporting):
-  RMSE      : $1,262.30
-  MAE       :   $480.58
-  R²        :   0.5814
-  WAPE      :  69.63%
-  SMAPE     :  89.10%
+DOLLAR-SCALE (business reporting):
+  R²    :  0.5814
+  MAE   :  $480.58
+  RMSE  :  $1,262.30
+  WAPE  :  69.63%
+  SMAPE :  89.10%
+
+Avg predicted spend: $533.24 | Avg actual spend: $690.22
 ```
 
-### 5.3 Segment-Level Performance
+### Segmentation Leaderboard
 
-| Segment | N | Dollar R² | MAE | WAPE | Avg Actual | Avg Predicted |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Top 20% Spenders** | 76 | **0.376** | $2,221 | 55.4% | $4,007 | $2,553 |
-| Mid Spenders | 236 | −2.30 | $431 | 66.7% | $647 | $467 |
-| Low Spenders | 61 | −10.37 | $135 | 95.6% | $142 | $167 |
-| Zero-Spend (Churned) | 302 | — | $151 | 79.5% | $0 | $151 |
-| **All Customers** | **675** | **0.581** | **$481** | **69.6%** | **$690** | **$533** |
+| Model | Silhouette | Davies-Bouldin | Calinski-H | Notes |
+|---|---|---|---|---|
+| DBSCAN (excl. noise) | **0.7208** | **0.3552** | 171 | 2.4% noise |
+| Hierarchical | 0.6025 | 1.2336 | 1,233 | k=2 |
+| **K-Means** | 0.5340 | 1.2058 | **1,552** | k=2 ← champion |
+| GMM | 0.3783 | 1.3853 | 1,145 | k=2 |
 
----
+### Anomaly Detection Leaderboard
 
-## 6. Visual Evidence
-
-### Business Lift Analysis — The ROI Chart
-
-*The gain chart is the single most important business output of this project. Customers are ranked by predicted CLV and accumulated from highest to lowest. Targeting just the top 10% of customers identified by the model captures 53% of total future revenue — 5.3× better than random outreach. Targeting the top 20% captures 65% of revenue — 3.25× better than random. Targeting the top 40% captures 80% of revenue. For a business spending $10 per customer on retention outreach, this lift translates to eliminating ~$130K of wasted spend per 10,000 customers compared to untargeted campaigns.*
-
-![Business Lift](artifacts/graphs/business_lift.png)
+| Model | Mean Score | Flagged | % Flagged |
+|---|---|---|---|
+| Isolation Forest | 0.1886 | 170 | 5.0% |
+| Autoencoder | 0.1018 | 104 | 3.1% |
+| **Ensemble (Combined)** | **0.1409** | **128** | **3.8%** |
 
 ---
 
-### Actual vs Predicted Spend — Statistical Validation
+## 6. Key Configuration Variables
 
-*Left (dollar scale): The scatter follows the perfect prediction line closely for low-to-mid spenders, with expected variance at the high end — an inherent property of predicting from historical signals. Right (log scale): The spending population (top-right quadrant) shows strong diagonal alignment. The vertical band at zero represents churned customers correctly assigned near-zero predictions by Stage 1 — these are the model correctly identifying non-buyers, not prediction failures.*
+These are the variables you change to tune the platform behavior. All are defined in `src/config.py` and the respective module files.
 
-![Accuracy Check](artifacts/graphs/accuracy_check.png)
+### `src/config.py` — Global Constants
+
+```python
+RANDOM_SEED   = 42        # Reproducibility seed for all models
+SPLIT_DAYS    = 90        # Prediction window in days
+                          # ↑ increase for longer-term CLV (e.g. 180 = 6-month CLV)
+                          # ↓ decrease for shorter-term (e.g. 30 = monthly)
+
+MODEL_VERSION = "2.5.0"   # Bumped when retraining
+```
+
+### `src/modeling.py` — CLV Model Tuning
+
+```python
+LOG_PRED_MAX    = 12.0    # Clips log-scale predictions
+                          # expm1(12.0) = $162,754 max predicted CLV
+                          # ↑ raise if dataset has extreme whale customers
+
+CHURN_THRESHOLD = 0.50    # Stage 1 classifier threshold
+                          # ↓ lower (e.g. 0.40) → more customers predicted as spenders
+                          #   (better recall on spenders, more false positives)
+                          # ↑ raise (e.g. 0.60) → stricter churn classification
+                          #   (fewer false positives, may miss borderline spenders)
+```
+
+### `src/segmentation.py` — Clustering Tuning
+
+```python
+N_CLUSTERS_RANGE = range(2, 8)   # k values tested in elbow analysis
+                                  # extend to range(2, 10) for finer granularity
+
+SEGMENTATION_FEATURES = [         # 10 of 16 features used for clustering
+    'Recency', 'Frequency', 'Monetary',
+    'Purchase_Rate', 'Days_Since_Purchase',
+    'Unique_Products', 'Avg_Basket_Size',
+    'Return_Rate', 'Max_Single_Order',
+    'Monetary_Percentile',
+]                                 # add/remove features to change cluster shapes
+
+PCA_N_COMPONENTS = 6              # Dimensionality before clustering
+                                  # current: 96.8% variance explained
+                                  # ↑ raise to retain more variance (slower)
+                                  # ↓ lower for faster training
+```
+
+### `src/anomaly.py` — Anomaly Detection Tuning
+
+```python
+IF_CONTAMINATION     = 0.05   # Expected fraction of anomalies
+                               # ↑ raise (e.g. 0.10) to flag more customers
+                               # ↓ lower (e.g. 0.02) for stricter flagging
+
+IF_N_ESTIMATORS      = 200    # More trees = more stable scores (slower)
+
+AE_EPOCHS            = 100    # Autoencoder training epochs
+                               # ↑ raise for better reconstruction (slower)
+
+AE_BOTTLENECK_DIM    = 8      # Compressed representation size
+                               # ↓ lower = more compression = better anomaly detection
+                               # ↑ raise = more capacity = risk of memorizing normal
+
+WEIGHT_IF            = 0.45   # Isolation Forest ensemble weight
+WEIGHT_AE            = 0.55   # Autoencoder ensemble weight
+                               # adjust to favor one model over the other
+
+ANOMALY_SCORE_THRESHOLD  = 0.50   # Score above this → flagged as anomaly
+RETURN_RATE_THRESHOLD    = 0.30   # Return rate above this → high-return flag
+```
+
+### `src/association_rules.py` — Rules Tuning
+
+```python
+MIN_SUPPORT     = 0.02    # Product set must appear in ≥2% of baskets
+                           # ↓ lower (e.g. 0.01) → more rules, more niche associations
+                           # ↑ raise (e.g. 0.05) → fewer but stronger rules
+
+MIN_CONFIDENCE  = 0.20    # Rule fires ≥20% of the time
+                           # ↑ raise for higher-confidence recommendations only
+
+MIN_LIFT        = 1.10    # Must be 10% above random
+                           # ↑ raise (e.g. 2.0) for only strong associations
+
+TOP_N_RECOMMENDATIONS = 5  # Cross-sell recommendations per product
+```
+
+### `src/richer_segmentation.py` — K-Selection Tuning
+
+```python
+K_RANGE = [2, 3, 4, 5]   # k values evaluated
+                           # extend to [2,3,4,5,6,7] to test more granular splits
+
+# Composite score weights
+# 50% Silhouette + 25% Davies-Bouldin + 25% Calinski-Harabasz
+# change weights in evaluate_k_range() if you want different priorities
+```
+
+### `streamlit_app.py` — Dashboard Tuning
+
+```python
+SEGMENT_P20 = 150.0    # Dollar threshold for Low → Mid boundary
+SEGMENT_P80 = 1_200.0  # Dollar threshold for Mid → Whale boundary
+                        # These come from training data percentiles
+                        # Update if retraining on different data
+```
 
 ---
 
-### Feature Importance — Dual Stage Analysis
+## 7. Technical Decisions & Rationale
 
-*Two separate importance charts for the Two-Stage CatBoost champion — one for each stage. Left (purple, Stage 2 Regressor): `Max_Single_Order` dominates at ~3× the importance of `Monetary_Percentile`, validating the wholesale buyer detection hypothesis. `Avg_Basket_Size` and `Prob_Pred_Txn` rank 3rd and 4th, showing that both basket-level behavior and BTYD probabilistic features contribute independently. Right (red, Stage 1 Classifier): `Unique_Products` and `Days_Since_Purchase` are the top churn signals — customers who have purchased many product types recently are unlikely to have churned. The feature hierarchies differ between stages, confirming that spend amount and churn probability are driven by different behavioral signals.*
+### Dollar-Space vs Log-Space Combination
 
-![Feature Importance](artifacts/graphs/feature_importance.png)
+The Two-Stage combination happens in **dollar-space**, not log-space. This distinction matters:
 
----
+```python
+# CORRECT — dollar-space
+E[spend] = P(spend>0) × expm1(E[log1p(spend)|spend>0])
 
-### SHAP Feature Impact — Global Interpretability
+# WRONG — log-space (previous version)
+# This compressed every prediction by the exponent of the probability
+# Result: avg predicted $182 vs avg actual $761
+```
 
-*SHAP beeswarm plot computed on 394 predicted-spending customers using the Stage 2 Regressor. Each dot is one customer. Red = high feature value, Blue = low feature value. Key insights: `Max_Single_Order` high values (red) push predictions strongly positive — the right tail confirms wholesale buyers receive the largest upward push. `Monetary_Percentile` shows clean monotonic behavior — higher tier consistently means higher predicted spend. `Return_Rate` correctly pushes predictions negative. `Prob_Alive` clusters near zero SHAP — suggesting that given all other behavioral features, the BG/NBD alive probability contributes minimal additional signal.*
+Switching to dollar-space combination reduced SMAPE from 126% to 82%.
 
-![SHAP Summary](artifacts/graphs/shap_summary.png)
+### Leakage-Free Monetary_Percentile
 
----
+`Monetary_Percentile` is computed using `np.searchsorted` against the training distribution — test customers are assigned percentiles anchored on training data only. A naive `rank()` on the combined dataset is a leakage error.
 
-### SHAP Waterfall — Whale Customer (Actual: $26,721)
+### BTYD on Uncapped Data
 
-*Individual prediction breakdown for the highest-spending customer in the test set. Every feature pushes positive — this customer has `Max_Single_Order = $3,685`, `Monetary_Percentile = 0.987` (top 1.3% of historical spenders), `Frequency = 19` purchases, and `Visit_Diversity = 32` unique purchase dates. Starting from the baseline `E[f(X)] = 6.383`, the model pushes 3.56 log-units upward to `f(x) = 9.943`, corresponding to a predicted spend of ~$21,000. The 21% underprediction ($26,721 actual vs ~$21,000 predicted) is the irreducible compression of extreme whale behavior from a 4,300-customer training set.*
+BG/NBD and Gamma-Gamma are fitted on **uncapped** transaction data. Capping occurs after BTYD feature extraction. Fitting on capped data would underestimate `Prob_Pred_Txn` for wholesale buyers — precisely the customers with the highest CLV.
 
-![SHAP Waterfall Whale](artifacts/graphs/shap_waterfall_whale_customer.png)
+### Temporal Split Design
 
----
+```python
+split_date = max_date − SPLIT_DAYS     # single anchor date
+train_txns = df[InvoiceDate < split_date]
+test_txns  = df[InvoiceDate >= split_date]
+observation_period_end = split_date    # RFM reference point
+```
 
-### SHAP Waterfall — Mid-Spender (Actual: $718)
+Random splits on transaction data are a leakage error. The temporal split ensures no future transaction contaminates feature computation.
 
-*Individual prediction breakdown for a median-spend customer. `Max_Single_Order = $1,534` and `Monetary_Percentile = 0.922` push positive, but `Recency = 138` days pushes −0.07 (hasn't purchased recently), and low `Frequency = 3` pushes −0.04. The model is correctly uncertain about this customer — mixed signals from high order value but low recent engagement. Final prediction `f(x) = 6.875` ≈ $970 against actual $718, a 35% overprediction typical for mid-range customers with sparse recent history.*
+### Champion Selection Criterion
 
-![SHAP Waterfall Mid](artifacts/graphs/shap_waterfall_mid-spender.png)
+```python
+# Eligible if: not a baseline, has independent CV, Dollar R² > 0.10
+eligible = (~model.isin(BASELINES)) & (Dollar_R2 > 0.10)
+champion = eligible_models.sort_values('cv_mae').iloc[0]
+```
 
----
+The Dollar R² floor prevents selecting a model that wins on log-MAE but is economically useless.
 
-### SHAP Waterfall — Low Spender (Actual: $30)
+### Anomaly Score Normalization
 
-*Individual prediction breakdown for a low-value customer. `Max_Single_Order = $176` is the dominant signal, pushing −0.31 (low max order = not a wholesale buyer). Nearly all features push negative — low `Frequency = 1`, `Visit_Diversity = 2`, `Purchase_Rate = 0.005`. Yet the final prediction `f(x) = 5.812` corresponds to ~$333 against actual $30 — a 10× overprediction. This is the core failure mode for low spenders: the model cannot distinguish between a one-time buyer who will remain dormant and a new customer who will become active. This requires engagement data (site visits, email opens) not available in transaction logs.*
+The Autoencoder reconstruction errors have one extreme outlier (error ~1052 vs mean ~0.44). We clip at the 99th percentile before MinMaxScaler normalization:
 
-![SHAP Waterfall Low](artifacts/graphs/shap_waterfall_low_spender.png)
+```python
+p99     = np.percentile(ae_raw, 99)
+ae_clip = np.clip(ae_raw, 0, p99)
+ae_norm = MinMaxScaler().fit_transform(ae_clip)
+```
 
----
-
-### Stage 1 Calibration Analysis
-
-*Left: Calibration curve for the Stage 1 classifier (churn vs. return). Points above the diagonal = overconfident (model predicts higher P(spend) than actual). Points below = underconfident. The champion classifier is well-calibrated above P = 0.40 and slightly overconfident at low probabilities (0.0–0.25 range). Right: Probability distribution of P(spend > $0) split by actual spenders (blue) and non-spenders (pink). The churn threshold at 0.50 (red dashed line) captures 394 customers as predicted spenders. The significant overlap between the two distributions in the 0.30–0.60 range is the fundamental ambiguity in this dataset — these are customers whose behavioral signals are genuinely indistinguishable from transactional data alone.*
-
-![Calibration Curve](artifacts/graphs/calibration_curve.png)
-
----
-
-### Residual Analysis — Diagnostic
-
-*Left: Residual distribution showing a bimodal structure — a sharp spike at zero (churned customers correctly predicted as $0) and a right-leaning bell for active customers. The mean residual of −0.052 is nearly zero — a significant improvement over earlier versions (previously +0.633), indicating the pipeline no longer has systematic underprediction bias for the spending population. Right: Heteroscedasticity plot — the diagonal band of strongly negative residuals at predicted values 4–8 represents churned customers whose actual spend is $0 but are assigned positive predicted spend by the model.*
-
-![Residual Analysis](artifacts/graphs/residual_analysis.png)
-
----
-
-## 7. Honest Limitations & What I Would Do Next
-
-This section exists because senior practitioners evaluate candidates on whether they understand *why* their model behaves as it does — not just what the headline metrics are. CLV prediction is a structurally hard problem and every result in this project has a specific, diagnosable reason.
-
-### Why Log R² is Negative (−0.061) Despite Dollar R² of 0.581
-
-This is not a contradiction — it is a mathematical property of the Two-Stage architecture on zero-inflated data.
-
-The Two-Stage model assigns exactly $0 (and therefore `log1p(0) = 0`) to ~45% of customers. The log-scale mean of the test set is pulled toward ~3.6 by the spending population. Log R² measures variance explained relative to the log-scale mean — a model that aggressively zeros churners will always diverge from this mean and produce negative Log R², even when its dollar predictions are accurate.
-
-Dollar R² (0.581) is the economically meaningful metric. It measures what fraction of actual dollar variance the model explains — 58.1% of real revenue variance. This is the number that matters for marketing budget decisions.
-
-### Why Mid and Low Spenders Have Negative R²
-
-Mid Spenders (R² = −2.30) and Low Spenders (R² = −10.37) are the model's weakest segments. These customers have low-frequency, irregular purchase patterns with RFM profiles that overlap significantly with churned customers. The model cannot reliably distinguish between "low-value active customer" and "churned customer" from transaction history alone.
-
-The model errs conservatively — it overpredicts slightly for low spenders ($167 predicted vs $142 actual) and underpredicts for mid spenders ($467 predicted vs $647 actual). From a business standpoint, conservative underprediction of mid-range customers is the correct direction of error — over-investing retention spend in a genuinely low-value customer is cheaper than missing a whale.
-
-### Why Zero-Spend Customers Still Average $151 Predicted
-
-302 customers spent exactly $0 in the test window but receive an average predicted spend of $151. The calibration curve explains why — there is significant overlap between spenders and non-spenders in the P(spend) = 0.30–0.50 range. Some customers who were historically active simply did not purchase in this specific 90-day window for reasons invisible to transactional data: seasonal behavior, life events, competitive switching, or temporary budget constraints.
-
-Reducing this false-positive rate requires engagement signals not available in this dataset — email open rates, site visit recency, app session frequency. A production CLV system would augment transaction features with these behavioral signals.
-
-### Dataset Scale Constraint
-
-The Online Retail II dataset contains ~4,300 unique customers after cleaning, yielding ~675 test customers. This is the primary ceiling on model performance. Three independent Two-Stage model variants (RF, CatBoost, XGBoost) all converge to Dollar R² of 0.43–0.58 on this dataset. This convergence strongly suggests 0.58 is the extractable signal ceiling for this dataset size and feature set — not a tuning problem.
-
-The same pipeline architecture on a dataset with 50,000+ customers would realistically achieve Dollar R² of 0.65–0.75, tighter segment estimates, and better calibration for the zero-spend boundary.
-
-### What I Would Do Next
-
-| Extension | Expected Impact |
-|---|---|
-| **FastAPI serving endpoint** — `POST /predict-clv` accepting Customer ID, returning 90-day CLV with confidence interval | Makes the model usable in production retention systems |
-| **Larger dataset** (Instacart, Olist, or enterprise logs — 50k+ customers) | Dollar R² realistically reaches 0.65–0.75 on same architecture |
-| **Engagement feature augmentation** (email open rate, site visit recency, app sessions) | Directly addresses the zero-spend false-positive problem and the low-spender R² |
-| **Held-out calibration set** for Stage 1 | `cv='prefit'` calibrates on training data — a dedicated 10% calibration split would produce more reliable probability estimates |
-| **Conformal prediction intervals** | Replace point predictions with calibrated 80% prediction intervals — communicates model uncertainty to business stakeholders |
+Without this fix, one customer collapses all others to ~0.0004.
 
 ---
 
-## 8. Repository Structure
+## 8. Diagnostic Plots
+
+All plots are saved to `artifacts/graphs/` and displayed in the Streamlit app.
+
+| Plot | File | Description |
+|---|---|---|
+| Accuracy Check | `accuracy_check.png` | Actual vs predicted on dollar + log scale |
+| Business Lift | `business_lift.png` | Gain chart — top 10% captures 53% of revenue |
+| Feature Importance | `feature_importance.png` | Stage 1 + Stage 2 dual importance |
+| Residual Analysis | `residual_analysis.png` | Error distribution + heteroscedasticity |
+| SHAP Summary | `shap_summary.png` | Beeswarm on 394 predicted-spending customers |
+| SHAP Waterfall Whale | `shap_waterfall_whale_customer.png` | Highest-spend customer breakdown |
+| SHAP Waterfall Mid | `shap_waterfall_mid-spender.png` | Median customer breakdown |
+| SHAP Waterfall Low | `shap_waterfall_low_spender.png` | Low-spend customer breakdown |
+| Calibration Curve | `calibration_curve.png` | Stage 1 classifier calibration |
+| Elbow + Silhouette | `seg_elbow_silhouette.png` | Optimal k selection |
+| UMAP Clusters | `seg_umap.png` | 2D cluster map |
+| CLV Heatmap | `seg_clv_heatmap.png` | Segment × CLV tier cross-tabulation |
+| Cluster Profiles | `seg_cluster_profiles.png` | Feature heatmap per segment |
+| Dendrogram | `seg_dendrogram.png` | Hierarchical clustering tree |
+| 3D RFM Scatter | `seg_rfm_3d.png` | Recency/Frequency/Monetary 3D view |
+| PCA Scree | `seg_pca_variance.png` | Variance explained per component |
+| DBSCAN Map | `seg_dbscan_map.png` | Core points vs noise points |
+| Anomaly Scores | `anomaly_score_distribution.png` | Score histogram + threshold |
+| Anomaly Features | `anomaly_feature_importance.png` | Permutation importance for IF |
+| Anomaly UMAP | `anomaly_umap.png` | UMAP coloured by anomaly score |
+| Return Flags | `anomaly_return_flags.png` | Return rate vs anomaly score scatter |
+| AR Support/Confidence | `ar_support_confidence.png` | Rule quality scatter |
+| AR Lift Heatmap | `ar_lift_heatmap.png` | Top 15 product pair lift matrix |
+| AR Top Rules | `ar_top_rules_bar.png` | Top 20 rules by lift |
+| AR Segment Comparison | `ar_segment_comparison.png` | Champions vs Loyal Customers rules |
+| K Comparison | `rs_k_comparison.png` | Metrics across k=2..5 |
+| Segment Profiles v2 | `rs_segment_profiles.png` | Standardised z-score heatmap |
+| CLV by Segment | `rs_clv_by_segment.png` | Boxplot per segment |
+
+---
+
+## 9. Repository Structure
 
 ```
 clv-prediction-engine/
 │
-├── assets/                                # README screenshots
-│   ├── streamlit_landing.png
-│   ├── streamlit_prediction.png
-│   ├── mlflow_runs.png
-│   └── mlflow_champion.png
+├── api/
+│   ├── __init__.py
+│   └── main.py                    # FastAPI — 4 endpoints
 │
 ├── artifacts/
-│   ├── graphs/
-│   │   ├── accuracy_check.png
-│   │   ├── business_lift.png
-│   │   ├── feature_importance.png
-│   │   ├── residual_analysis.png
-│   │   ├── shap_summary.png
-│   │   ├── shap_waterfall_whale_customer.png
-│   │   ├── shap_waterfall_mid-spender.png
-│   │   ├── shap_waterfall_low_spender.png
-│   │   ├── calibration_curve.png
-│   │   └── segment_metrics.csv
+│   ├── graphs/                    # All 27 diagnostic plots + CSVs
 │   └── models/
-│       └── clv_champion_bundle.pkl
+│       ├── clv_champion_bundle.pkl
+│       ├── segmentation_bundle.pkl
+│       ├── richer_seg_bundle.pkl
+│       ├── anomaly_bundle.pkl
+│       └── association_rules_bundle.pkl
 │
-├── data/
-│   └── online_retail_II.csv              # Git-ignored
+├── assets/                        # README screenshots
 │
 ├── notebooks/
-│   └── main_execution.ipynb
+│   ├── main_execution.ipynb       # CLV pipeline
+│   └── segmentation.ipynb         # Segmentation + anomaly + AR pipeline
 │
 ├── src/
 │   ├── __init__.py
-│   ├── config.py
-│   ├── data_ingestion.py
-│   ├── feature_engineering.py
-│   ├── modeling.py                       # MLflow tracking
-│   └── evaluation.py                     # SHAP + LIME
+│   ├── config.py                  # All constants — edit here first
+│   ├── data_ingestion.py          # Schema validation + cleaning
+│   ├── feature_engineering.py     # 16-feature hybrid build
+│   ├── modeling.py                # 14-model zoo + MLflow
+│   ├── evaluation.py              # SHAP + LIME + 8 plots
+│   ├── segmentation.py            # 7 clustering models
+│   ├── anomaly.py                 # IF + PyTorch Autoencoder
+│   ├── association_rules.py       # FP-Growth + recommendation engine
+│   └── richer_segmentation.py     # k=2..5 composite scoring
 │
-├── streamlit_app.py                      # Live dashboard
+├── tests/
+│   ├── conftest.py
+│   └── test_pipeline.py           # 52 tests across 6 classes
+│
+├── .dockerignore
 ├── .gitignore
-├── README.md
-└── requirements.txt
+├── Dockerfile                     # Multi-stage build
+├── docker-compose.yml
+├── requirements.txt
+├── streamlit_app.py               # 5-tab dashboard v3.1.0
+└── README.md
 ```
 
 ---
 
-## 9. Quickstart
+## 10. Quickstart
 
 ### 🌐 Option A — Live App (No Installation)
 
-Visit **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.app)** directly in your browser.
+Visit **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.app)** in your browser.
 
 ---
 
@@ -571,28 +637,29 @@ Visit **[https://clv-deep-shah.streamlit.app](https://clv-deep-shah.streamlit.ap
 
 **1. Upload project to Google Drive:**
 ```
-MyDrive/
-└── clv-prediction-engine/
-    ├── src/
-    ├── notebooks/
-    ├── data/
-    └── requirements.txt
+MyDrive/clv-prediction-engine/
+├── src/
+├── notebooks/
+├── data/online_retail_II.csv
+└── requirements.txt
 ```
 
-**2. Open `notebooks/main_execution.ipynb` in Google Colab.**
+**2. Open `notebooks/main_execution.ipynb` in Colab**
 
-**3. Install dependencies (Cell 0 — first session only):**
+**3. Install dependencies (first session only):**
 ```python
 !pip install lifetimes xgboost lightgbm catboost shap mlflow lime --quiet
+!pip install mlxtend squarify umap-learn --quiet
+!pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet
 ```
 
-**4. Run all cells.**
+**4. Run all cells** — pipeline saves all artifacts to Drive automatically.
 
-The pipeline mounts Drive, loads the dataset, runs all 8 steps, and saves every artifact — 8 graphs, model bundle, segment CSV, and log file — back to Drive automatically. MLflow runs are saved directly to Drive for local viewing.
+**5. Open `notebooks/segmentation.ipynb`** to run segmentation, anomaly, and association rules pipelines.
 
 ---
 
-### 💻 Option C — Local (VS Code / Terminal)
+### 💻 Option C — Local (VS Code)
 
 ```bash
 # Clone
@@ -604,49 +671,160 @@ pip install -r requirements.txt
 
 # Place dataset at: data/online_retail_II.csv
 
-# Run pipeline
+# Run CLV pipeline
 jupyter notebook notebooks/main_execution.ipynb
+
+# Run segmentation + anomaly + AR pipeline
+jupyter notebook notebooks/segmentation.ipynb
 
 # Launch Streamlit app
 streamlit run streamlit_app.py
 
-# Launch MLflow UI (separate terminal)
-mlflow ui --port 5000
+# Run tests
+pytest tests/test_pipeline.py -v
+
+# Launch API
+uvicorn api.main:app --reload --port 8000
+```
+
+### 🐳 Option D — Docker
+
+```bash
+docker build -t clv-platform .
+docker run -p 8000:8000 clv-platform
+
+# Or with docker-compose
+docker-compose up --build
 ```
 
 ---
 
-## 10. Dataset
+## 11. API Reference
+
+The FastAPI endpoint serves all three models. Auto-generated docs at `http://localhost:8000/docs`.
+
+### `GET /health`
+Returns status of all loaded model bundles.
+```json
+{
+  "status": "healthy",
+  "api_version": "1.0.0",
+  "models": {
+    "clv":          {"loaded": true, "version": "2.5.0"},
+    "segmentation": {"loaded": true, "optimal_k": 2},
+    "anomaly":      {"loaded": true, "version": "1.0.0"}
+  }
+}
+```
+
+### `POST /predict-clv`
+Returns 90-day CLV prediction + confidence range + segment.
+```json
+// Request
+{"Recency": 90, "Frequency": 12, "Monetary": 850}
+
+// Response
+{
+  "predicted_clv_90d": 1342.50,
+  "clv_low": 1141.12,
+  "clv_high": 1543.87,
+  "segment": "🐋 Whale",
+  "segment_key": "whale",
+  "model_version": "2.5.0"
+}
+```
+
+### `POST /segment-customer`
+Returns K-Means cluster assignment + segment name.
+```json
+// Response
+{
+  "cluster_id": 1,
+  "segment_name": "Loyal Customers",
+  "silhouette_score": 0.5340,
+  "optimal_k": 2
+}
+```
+
+### `POST /detect-anomaly`
+Returns anomaly score + risk level + business flags.
+```json
+// Response
+{
+  "anomaly_score": 0.7234,
+  "if_score": 0.6891,
+  "risk_level": "🔴 High",
+  "is_anomaly": true,
+  "is_high_return": false,
+  "flags": {
+    "is_anomaly": true,
+    "is_high_return": false,
+    "is_whale": false,
+    "is_suspicious": false
+  }
+}
+```
+
+---
+
+## 12. Dataset
 
 **Online Retail II — UCI Machine Learning Repository**
 
 | Property | Value |
 |---|---|
 | Source | [UCI ML Repository](https://archive.ics.uci.edu/dataset/502/online+retail+ii) |
-| Rows (raw) | ~1,067,371 transactions |
-| Rows (after cleaning) | ~750,000 transactions |
-| Unique customers (cleaned) | ~4,300 |
+| Raw rows | ~1,067,371 transactions |
+| After cleaning | ~750,000 transactions |
+| Unique customers | ~4,300 |
 | Date range | December 2009 – December 2011 |
-| Geography | UK-based online retailer, international customers |
-| Features used | Customer ID, InvoiceDate, Quantity, Price, Invoice, StockCode |
-| Target | Aggregate customer spend in 90-day prediction window |
+| Geography | UK-based online retailer |
+| Columns used | Customer ID, InvoiceDate, Quantity, Price, Invoice, StockCode, Description |
+| Target | Aggregate spend in 90-day prediction window |
 
-**Cleaning decisions and rationale:**
+**Cleaning decisions:**
 
 | Decision | Rationale |
 |---|---|
-| Drop rows with missing Customer ID | ~25% of raw data — guest/POS transactions with no customer history |
-| Exclude negative Quantity rows | Returns — excluded from sales pipeline but captured in `Return_Rate` feature |
-| Exclude zero/negative Price rows | Internal stock transfers and write-offs — not customer revenue events |
-| Deduplicate on `[Invoice, StockCode, Customer ID, InvoiceDate]` | Online Retail II contains duplicate rows that inflate Frequency and TotalAmount |
-| Cast Customer ID: `float → Int64 → str` | Raw CSV encodes Customer ID as float due to NaN rows — naive string cast produces `'12345.0'` artifacts |
-| Price dtype: `float64` (not `float32`) | `float32` introduces precision errors on multiplication — compounds across millions of rows in `TotalAmount` |
+| Drop missing Customer ID | ~25% of raw data — POS transactions with no customer history |
+| Exclude negative Quantity | Returns — captured in `Return_Rate` feature instead |
+| Exclude zero/negative Price | Internal transfers, not revenue events |
+| Deduplicate on `[Invoice, StockCode, CustomerID, Date]` | Online Retail II contains duplicate rows inflating Frequency |
+| Cast Customer ID: `float → Int64` | Raw CSV encodes as float due to NaN rows — naive cast produces `'12345.0'` |
+| Price dtype: `float64` | `float32` introduces precision errors compounding across millions of rows |
+
+---
+
+## 13. Honest Limitations
+
+### Why Log R² is Negative (−0.061) Despite Dollar R² 0.581
+
+The Two-Stage model assigns exactly $0 to ~45% of customers. Log R² measures variance explained relative to the log-scale mean (~3.6) — a model aggressively zeroing churners always diverges from this mean. Dollar R² (0.581) is the economically meaningful metric.
+
+### Why Mid and Low Spenders Have Negative R²
+
+Mid (R²=−2.30) and Low (R²=−10.37) spenders have RFM profiles overlapping with churned customers. The model cannot distinguish "low-value active" from "churned" on transaction signals alone. Engagement data (email opens, site visits) would address this.
+
+### Dataset Scale Constraint
+
+~4,300 customers after cleaning. Three independent Two-Stage variants converge to R²=0.43–0.58, suggesting 0.58 is the extractable signal ceiling for this dataset. The same architecture on 50,000+ customers would realistically reach R²=0.65–0.75.
+
+### What's Next
+
+| Extension | Expected Impact |
+|---|---|
+| Cluster membership as CLV feature | +2–4% Dollar R² improvement |
+| Engagement feature augmentation | Addresses low-spender R² and zero-spend false positives |
+| Per-segment association rules | Requires CustomerID linkage between transaction and segment data |
+| Conformal prediction intervals | Replace point predictions with calibrated 80% intervals |
+| Temporal drift monitoring (PSI/KL) | Alert when prediction distribution shifts from training |
 
 ---
 
 <p align="center">
-  Built as a portfolio project demonstrating production ML engineering practices.<br/>
-  Structured for correctness, business interpretability, and honest evaluation.<br/><br/>
-  <a href="https://clv-deep-shah.streamlit.app">🚀 Live Demo</a> &nbsp;|&nbsp;
+  Built as a portfolio project demonstrating production ML engineering — <br/>
+  supervised + unsupervised learning, deployed dashboard, REST API, containerization, and testing.<br/><br/>
+  <a href="https://clv-deep-shah.streamlit.app">🚀 Live Demo</a>
+  &nbsp;|&nbsp;
   <a href="https://github.com/DeepShah111/clv-prediction-engine">📁 GitHub</a>
 </p>
