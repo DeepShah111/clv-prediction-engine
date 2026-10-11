@@ -28,11 +28,32 @@ import numpy as np
 from lifetimes import BetaGeoFitter, GammaGammaFitter
 from lifetimes.utils import summary_data_from_transaction_data
 from src.config import FEATURE_COLS, RANDOM_SEED
+from src.feature_utils import _compute_return_rate
 
 logger = logging.getLogger(__name__)
 
 TRAIN_RATIO = 0.75
 
+def _compute_return_rate(raw_df, customer_index, split_date):
+    """
+    Share of each customer's invoices (before split_date) that were returns.
+    Customer IDs are converted exactly like clean_data does (float -> Int64 -> str),
+    so they match the text IDs in customer_index.
+    """
+    ids   = (pd.to_numeric(raw_df['Customer ID'], errors='coerce')
+             .astype('Int64').astype(str))
+    dates = pd.to_datetime(raw_df['InvoiceDate'])
+    keep  = (dates < split_date) & ids.isin(customer_index)
+
+    sub = raw_df.loc[keep].copy()
+    sub['Customer ID'] = ids[keep]
+
+    total_orders  = sub.groupby('Customer ID')['Invoice'].nunique()
+    return_orders = (sub[sub['Quantity'] < 0]
+                     .groupby('Customer ID')['Invoice'].nunique())
+
+    rate = (return_orders / total_orders).fillna(0).clip(0, 1)
+    return rate.reindex(customer_index, fill_value=0.0)
 
 def build_hybrid_features(
     df: pd.DataFrame,
@@ -142,17 +163,9 @@ def build_hybrid_features(
         .clip(lower=0)
     )
 
-    # 3e. Return rate
+    # 3e. Return rate (training window only, IDs aligned with clean_data)
     if raw_df is not None:
-        raw_filtered  = raw_df[raw_df['Customer ID'].isin(rfm.index)].copy()
-        total_orders  = raw_filtered.groupby('Customer ID')['Invoice'].nunique()
-        return_orders = (
-            raw_filtered[raw_filtered['Quantity'] < 0]
-            .groupby('Customer ID')['Invoice']
-            .nunique()
-        )
-        return_rate = (return_orders / total_orders).fillna(0).clip(0, 1)
-        rfm['Return_Rate'] = return_rate.reindex(rfm.index, fill_value=0)
+        rfm['Return_Rate'] = _compute_return_rate(raw_df, rfm.index, split_date)
     else:
         logger.warning("raw_df not provided — Return_Rate set to 0 for all customers.")
         rfm['Return_Rate'] = 0.0
