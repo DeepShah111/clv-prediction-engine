@@ -63,6 +63,7 @@ from sklearn.preprocessing import RobustScaler, MinMaxScaler
 from sklearn.metrics import roc_auc_score
 
 from src.config import GRAPHS_DIR, MODELS_DIR, RANDOM_SEED, FEATURE_COLS
+from src.anomaly_utils import apply_minmax, add_business_flags
 
 logger = logging.getLogger(__name__)
 
@@ -455,32 +456,12 @@ def build_anomaly_dataframe(
     df['IF_Score']       = if_norm
     df['AE_Score']       = ae_norm
     df['Anomaly_Score']  = combined_score
-    df['is_anomaly']     = combined_score > ANOMALY_SCORE_THRESHOLD
-
-    # High return flag
-    if 'Return_Rate' in df.columns:
-        df['is_high_return'] = (
-            (df['Return_Rate'] > RETURN_RATE_THRESHOLD) &
-            (combined_score > HIGH_RETURN_SCORE_MIN)
-        )
-    else:
-        df['is_high_return'] = False
-
-    # Whale anomaly flag (high value + anomalous)
-    if 'Monetary_Percentile' in df.columns:
-        df['is_whale_anomaly'] = (
-            (df['Monetary_Percentile'] > 90) & df['is_anomaly']
-        )
-    else:
-        df['is_whale_anomaly'] = False
-
-    # Suspicious flag: high return + anomaly + recent activity
-    if 'Recency' in df.columns:
-        df['is_suspicious'] = (
-            df['is_high_return'] & df['is_anomaly'] & (df['Recency'] < 30)
-        )
-    else:
-        df['is_suspicious'] = False
+    df = add_business_flags(
+        df, combined_score,
+        anomaly_threshold=ANOMALY_SCORE_THRESHOLD,
+        return_rate_threshold=RETURN_RATE_THRESHOLD,
+        high_return_score_min=HIGH_RETURN_SCORE_MIN,
+    )
 
     # Add CLV predictions for test-set rows
     if dollar_preds is not None:
@@ -815,6 +796,7 @@ def save_anomaly_results(
     scaler: RobustScaler,
     cols_used: List[str],
     metrics: Dict,
+    norm_params: Optional[Dict] = None,
 ) -> None:
     """
     Saves all anomaly outputs to GRAPHS_DIR and MODELS_DIR.
@@ -863,6 +845,7 @@ def save_anomaly_results(
             'autoencoder':      WEIGHT_AE,
         },
         'metrics':   metrics,
+        'norm':      norm_params,
         'version':   '1.0.0',
         'timestamp': datetime.utcnow().isoformat(),
     }
@@ -933,8 +916,9 @@ def assign_anomaly_score(
     X_scaled, _, _ = _prepare_anomaly_features(X, scaler=scaler, fit_scaler=False)
 
     # IF score
+    norm   = bundle.get('norm') or {}
     raw    = -if_model.decision_function(X_scaled)
-    if_s   = MinMaxScaler().fit_transform(raw.reshape(-1, 1)).ravel()
+    if_s   = apply_minmax(raw, norm.get('if_min'), norm.get('if_max'))
 
     # AE score
     if ae_model is not None and TORCH_AVAILABLE:
@@ -942,7 +926,7 @@ def assign_anomaly_score(
         ae_model = ae_model.to(device)
         tensor   = torch.tensor(X_scaled, dtype=torch.float32).to(device)
         ae_raw   = ae_model.reconstruction_error(tensor)
-        ae_s     = MinMaxScaler().fit_transform(ae_raw.reshape(-1, 1)).ravel()
+        ae_s     = apply_minmax(np.clip(ae_raw, 0, norm.get('ae_p99')), norm.get('ae_min'), norm.get('ae_max'))
         combined = WEIGHT_IF * if_s + WEIGHT_AE * ae_s
     else:
         ae_s     = np.zeros(len(X_scaled))
@@ -1061,7 +1045,16 @@ def run_anomaly_pipeline(
     else:
         ae_norm   = np.zeros(len(X_all))
         ae_avail  = False
-
+    norm_params = {
+        'if_min': float(if_scores_raw.min()),
+        'if_max': float(if_scores_raw.max()),
+    }
+    if ae_avail:
+        norm_params.update({
+            'ae_p99': float(p99),
+            'ae_min': float(ae_clip.min()),
+            'ae_max': float(ae_clip.max()),
+        })
     # ------------------------------------------------------------------
     # Step 4: Ensemble
     # ------------------------------------------------------------------
@@ -1131,7 +1124,7 @@ def run_anomaly_pipeline(
         ],
     }
 
-    save_anomaly_results(anomaly_df, if_model, ae_model, scaler, cols_used, metrics)
+    save_anomaly_results(anomaly_df, if_model, ae_model, scaler, cols_used, metrics, norm_params)
 
     # Print summary
     _print_leaderboard(metrics)

@@ -28,3 +28,6 @@ venv/
 env/
 mlruns/
 mlflow.db
+.venv/
+
+.venv/

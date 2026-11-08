@@ -58,6 +58,7 @@ from sklearn.utils.validation import check_is_fitted
 from sklearn.frozen import FrozenEstimator
 
 from src.config import RANDOM_SEED, FEATURE_COLS
+from src.cv_utils import make_cv_folds
 
 logger = logging.getLogger(__name__)
 
@@ -539,15 +540,13 @@ def train_and_benchmark(
             f"minimum required is {MIN_TRAIN_SAMPLES}."
         )
 
-    cv_folds = min(5, max(3, len(X_train) // 10))
     models   = _build_model_zoo(y_train)
     results  = []
 
     dollar_actual = np.expm1(y_test.values)
 
-    y_binary_cv      = (y_train.values > 0).astype(int)
-    skf              = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_SEED)
-    stratified_folds = list(skf.split(X_train, y_binary_cv))
+    # SAME shuffled, stratified folds for EVERY model (fair comparison)
+    stratified_folds = make_cv_folds(X_train, y_train)
 
     # Start parent MLflow run — all model runs nested inside
     if MLFLOW_AVAILABLE:
@@ -557,10 +556,7 @@ def train_and_benchmark(
     try:
         for name, model in models.items():
             try:
-                cv_splitter = (
-                    stratified_folds if isinstance(model, TwoStageRegressor)
-                    else cv_folds
-                )
+                cv_splitter = stratified_folds
                 cv_scores   = cross_val_score(
                     model, X_train, y_train,
                     cv=cv_splitter, scoring=CV_SCORING, n_jobs=-1
@@ -849,14 +845,7 @@ def tune_champion_model(
         },
     }
 
-    cv_folds = min(5, max(3, len(X_train) // 10))
-
-    y_binary_cv = (y_train.values > 0).astype(int)
-    if isinstance(best_model, TwoStageRegressor):
-        skf         = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_SEED)
-        cv_splitter = list(skf.split(X_train, y_binary_cv))
-    else:
-        cv_splitter = cv_folds
+    cv_splitter = make_cv_folds(X_train, y_train)
 
     pre_cv = -cross_val_score(
         best_model, X_train, y_train,
