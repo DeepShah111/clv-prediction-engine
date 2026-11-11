@@ -325,7 +325,8 @@ def _shap_fig(model, row):
         shap.plots.waterfall(exp[0], max_display=12, show=False)
         plt.tight_layout()
         return fig
-    except Exception:
+    except Exception as e:
+        st.caption(f"SHAP chart unavailable ({type(e).__name__}).")
         return None
 
 def _kpi(label, value, sub="", accent="#5C4DB1"):
