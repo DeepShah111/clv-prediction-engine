@@ -1,5 +1,5 @@
 """
-Customer Segmentation Module - v1.0.0
+Customer Segmentation Module - v1.1.0
 ======================================
 Unsupervised customer segmentation using the same RFM + behavioral features
 from the CLV pipeline (P1). Builds directly on top of feature_engineering.py
@@ -21,7 +21,12 @@ Evaluation metrics (no labels available)
 - Davies-Bouldin Index   - intra/inter cluster ratio, lower better
 - Calinski-Harabasz      - variance ratio criterion, higher better
 - Elbow Method           - inertia vs k for optimal K-Means k
-- Reconstruction Error   - for Autoencoder (in anomaly.py)
+
+Segment names (v1.1.0)
+----------------------
+Cluster numbers from K-Means are arbitrary, so segment names are NOT taken from a
+fixed dictionary. They are derived from each cluster's average predicted CLV
+(see src/segment_utils.name_clusters) and stored in the bundle.
 
 Diagnostic plots saved
 -----------------------
@@ -29,50 +34,44 @@ Plot S1: Elbow curve - inertia vs k (K-Means)
 Plot S2: Silhouette score vs k
 Plot S3: UMAP 2D - coloured by K-Means cluster
 Plot S4: t-SNE 2D - coloured by K-Means cluster
-Plot S5: Cluster profile heatmap - avg feature values per cluster
-Plot S6: Segment × CLV heatmap - cluster vs CLV tier
+Plot S5: Cluster profile heatmap - segment average / overall average per feature
+Plot S6: Segment x CLV heatmap - cluster vs CLV tier
 Plot S7: Dendrogram - hierarchical clustering
 Plot S8: RFM 3D scatter - coloured by cluster
 Plot S9: PCA explained variance - cumulative scree plot
 Plot S10: DBSCAN cluster map - noise points highlighted
 
-Business outputs saved
------------------------
-- segment_profiles.csv     - avg RFM + CLV per cluster
+Business outputs saved (by run_segmentation_pipeline itself)
+------------------------------------------------------------
+- segment_profiles.csv     - avg features per cluster + segment name
 - customer_segments.csv    - Customer-level cluster assignments + CLV tier
 - segmentation_metrics.csv - all evaluation scores across models
 
 Usage (from main_execution.ipynb or segmentation.ipynb)
 ---------------------------------------------------------
-    from src.segmentation import (
-        run_segmentation_pipeline,
-        get_optimal_k,
-        assign_segments,
-    )
+    from src.segmentation import run_segmentation_pipeline
 
     seg_results = run_segmentation_pipeline(
-        X_train     = X_train,
-        X_test      = X_test,
-        y_test_raw  = y_test_raw,
-        customer_ids = customer_ids_test,
+        X_train      = X_train,
+        X_test       = X_test,
+        y_test_raw   = y_test_raw,
+        dollar_preds = dollar_preds,
     )
+    # customer_ids default to X_test.index (the Customer IDs)
 """
 
 import logging
-import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import seaborn as sns
 import joblib
-from pathlib import Path
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Optional
 
 # Sklearn clustering
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
-from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.metrics import (
@@ -80,13 +79,12 @@ from sklearn.metrics import (
     davies_bouldin_score,
     calinski_harabasz_score,
 )
-from sklearn.pipeline import Pipeline
 
 # Scipy for dendrogram
 from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.spatial.distance import pdist
 
-from src.config import GRAPHS_DIR, MODELS_DIR, RANDOM_SEED, FEATURE_COLS
+from src.config import GRAPHS_DIR, MODELS_DIR, RANDOM_SEED
+from src.segment_utils import name_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +142,9 @@ CLV_TIER_THRESHOLDS = {
     'Churned': 0.0,
 }
 
-# Segment name mapping - assigned after profiling (updated post-analysis)
+# FALLBACK ONLY. Real segment names are derived from the cluster profile in
+# run_segmentation_pipeline and stored in the bundle. This dictionary is used
+# only if a caller does not pass segment_names (e.g. very old bundles).
 SEGMENT_LABELS = {
     0: 'Champions',
     1: 'Loyal Customers',
@@ -162,6 +162,29 @@ CLUSTER_COLORS = [
     '#2A9D8F', '#E9C46A', '#264653', '#F77F00',
     '#80B918', '#9B2226',
 ]
+
+
+# ===========================================================================
+# Small shared helpers
+# ===========================================================================
+
+def _clv_tier_label(dollar: float) -> str:
+    """Maps a predicted dollar CLV to its tier label."""
+    if dollar >= CLV_TIER_THRESHOLDS['Whale']:
+        return '🐋 Whale'
+    elif dollar >= CLV_TIER_THRESHOLDS['Mid']:
+        return '💰 Mid'
+    elif dollar >= CLV_TIER_THRESHOLDS['Low']:
+        return '📉 Low'
+    return '💤 Churned'
+
+
+def _segment_label(label, segment_names: Optional[dict] = None) -> str:
+    """Display name for a cluster label (-1 = DBSCAN noise)."""
+    if label == -1:
+        return 'Noise / Outlier'
+    names = segment_names or SEGMENT_LABELS
+    return names.get(int(label), f'Cluster {label}')
 
 
 # ===========================================================================
@@ -235,8 +258,8 @@ def get_optimal_k(
     returns on inertia reduction. The silhouette score finds the k where
     clusters are most cohesive and well-separated.
 
-    When both methods agree → use that k.
-    When they disagree → prefer silhouette (more meaningful business metric).
+    When both methods agree -> use that k.
+    When they disagree -> prefer silhouette (more meaningful business metric).
 
     Parameters
     ----------
@@ -290,6 +313,8 @@ def get_optimal_k(
     )
 
     if save_plots:
+        GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+
         # Plot S1 + S2: Elbow curve and Silhouette score
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -336,8 +361,10 @@ def fit_kmeans(
 
     K-Means is the primary segmentation model because:
     - Interpretable centroids map directly to RFM business segments
-    - Fast on ~4,300 customers
+    - Fast on a few thousand customers
     - Results overlay cleanly onto CLV predictions
+    - It can predict a segment for a brand-new customer (DBSCAN and
+      Hierarchical cannot)
 
     Parameters
     ----------
@@ -481,7 +508,10 @@ def tune_dbscan_optuna(
 
         return silhouette_score(X_scaled[mask], labels[mask])
 
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(
+        direction='maximize',
+        sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED),   # reproducible search
+    )
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
 
     best_eps     = study.best_params['eps']
@@ -510,7 +540,7 @@ def fit_gmm(
 
     GMM differs from K-Means in that each customer receives a probability
     of belonging to each cluster - not a hard assignment. This is useful for:
-    - Customers on the boundary between 'Loyal' and 'At Risk' segments
+    - Customers on the boundary between two segments
     - Uncertainty-aware marketing (don't invest heavily in borderline cases)
     - More flexible cluster shapes (elliptical vs spherical for K-Means)
 
@@ -562,6 +592,9 @@ def fit_hierarchical(
     helps validate that the chosen k is meaningful (large jumps in the
     dendrogram = natural cluster boundaries).
 
+    The dendrogram is drawn on a random sample of up to 200 customers. The red
+    line is the real height at which that sample's tree splits into n_clusters.
+
     Parameters
     ----------
     X_scaled        : scaled feature array
@@ -588,7 +621,9 @@ def fit_hierarchical(
 
     if save_dendrogram:
         try:
-            # Subsample for dendrogram readability (scipy linkage is O(n²))
+            GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Subsample for dendrogram readability (scipy linkage is O(n^2))
             max_dendro_samples = min(200, len(X_scaled))
             idx = np.random.RandomState(RANDOM_SEED).choice(
                 len(X_scaled), max_dendro_samples, replace=False
@@ -611,11 +646,16 @@ def fit_hierarchical(
                 f'(Ward linkage, {max_dendro_samples} customer sample)',
                 fontsize=13
             )
-            ax.set_xlabel('Customer Index', fontsize=11)
+            ax.set_xlabel('Customers (cluster sizes in brackets)', fontsize=11)
             ax.set_ylabel('Distance (Ward)', fontsize=11)
-            ax.axhline(y=ax.get_ylim()[1] * 0.4, color='red', lw=2,
-                       linestyle='--', label=f'Cut at k={n_clusters}')
-            ax.legend(fontsize=10)
+
+            # Real cut height: between the (k-1)-th and k-th highest merges
+            if n_clusters >= 2 and len(Z) >= n_clusters:
+                cut_height = (Z[-(n_clusters - 1), 2] + Z[-n_clusters, 2]) / 2
+                ax.axhline(y=cut_height, color='red', lw=2, linestyle='--',
+                           label=f'Cut that gives k={n_clusters} (in this sample)')
+                ax.legend(fontsize=10)
+
             fig.tight_layout()
             fig.savefig(GRAPHS_DIR / 'seg_dendrogram.png', bbox_inches='tight', dpi=150)
             plt.close(fig)
@@ -676,6 +716,7 @@ def fit_pca(
     X_pca = pca.fit_transform(X_scaled)
 
     if save_plot:
+        GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
         # Scree plot - individual explained variance
@@ -717,6 +758,7 @@ def compute_umap_embedding(
     X_scaled: np.ndarray,
     labels: np.ndarray,
     title_suffix: str = "K-Means",
+    segment_names: Optional[dict] = None,
 ) -> Optional[np.ndarray]:
     """
     Computes UMAP 2D embedding and saves scatter plot coloured by cluster.
@@ -751,15 +793,27 @@ def compute_umap_embedding(
         fname='seg_umap.png',
         xlabel='UMAP Dimension 1',
         ylabel='UMAP Dimension 2',
+        segment_names=segment_names,
     )
 
     return embedding
+
+
+def _make_tsne(perplexity: float) -> TSNE:
+    """Builds a TSNE model; scikit-learn renamed n_iter to max_iter."""
+    try:
+        return TSNE(n_components=2, perplexity=perplexity,
+                    random_state=RANDOM_SEED, max_iter=1000, verbose=0)
+    except TypeError:   # older scikit-learn versions
+        return TSNE(n_components=2, perplexity=perplexity,
+                    random_state=RANDOM_SEED, n_iter=1000, verbose=0)
 
 
 def compute_tsne_embedding(
     X_scaled: np.ndarray,
     labels: np.ndarray,
     title_suffix: str = "K-Means",
+    segment_names: Optional[dict] = None,
 ) -> np.ndarray:
     """
     Computes t-SNE 2D embedding and saves scatter plot coloured by cluster.
@@ -767,6 +821,8 @@ def compute_tsne_embedding(
     t-SNE is computationally expensive - subsampled to 1,000 customers
     if dataset is larger. Preserves local neighborhood structure well
     but can distort global distances (use UMAP for global structure).
+
+    NOTE: when subsampled, the returned embedding has fewer rows than X_scaled.
     """
     logger.info("[SEG] Computing t-SNE embedding (may take 30-60 seconds)...")
 
@@ -780,13 +836,7 @@ def compute_tsne_embedding(
         X_sub = X_scaled
         labels_sub = labels
 
-    tsne = TSNE(
-        n_components = 2,
-        perplexity   = min(30, len(X_sub) // 4),
-        random_state = RANDOM_SEED,
-        n_iter       = 1000,
-        verbose      = 0,
-    )
+    tsne = _make_tsne(min(30, len(X_sub) // 4))
     embedding = tsne.fit_transform(X_sub)
 
     _save_2d_scatter(
@@ -795,6 +845,7 @@ def compute_tsne_embedding(
         fname='seg_tsne.png',
         xlabel='t-SNE Dimension 1',
         ylabel='t-SNE Dimension 2',
+        segment_names=segment_names,
     )
 
     return embedding
@@ -807,15 +858,17 @@ def _save_2d_scatter(
     fname: str,
     xlabel: str = 'Dim 1',
     ylabel: str = 'Dim 2',
+    segment_names: Optional[dict] = None,
 ) -> None:
     """Saves a 2D scatter plot coloured by cluster label."""
+    GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
     unique_labels = sorted(set(labels))
     fig, ax = plt.subplots(figsize=(12, 8))
 
     for i, label in enumerate(unique_labels):
         mask = labels == label
         color = '#888888' if label == -1 else CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
-        seg_name = 'Noise / Outlier' if label == -1 else SEGMENT_LABELS.get(label, f'Cluster {label}')
+        seg_name = _segment_label(label, segment_names)
         ax.scatter(
             embedding[mask, 0], embedding[mask, 1],
             c=color, label=f'{seg_name} (n={mask.sum()})',
@@ -842,27 +895,40 @@ def plot_cluster_profiles(
     labels: np.ndarray,
     cols_used: list,
     model_name: str = "K-Means",
+    segment_names: Optional[dict] = None,
 ) -> pd.DataFrame:
-    """Generates Plot S5: Cluster profile heatmap."""
+    """
+    Generates Plot S5: cluster profile heatmap.
+
+    Each cell is (segment average) / (average of ALL customers) for a feature:
+    1.00 = same as the typical customer, 3.00 = three times the typical customer,
+    0.50 = half. Unlike min-max scaling, this keeps the size of the differences
+    visible even with only two segments.
+
+    Returns the raw (un-normalised) segment averages, indexed by segment name.
+    """
     try:
+        GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+
         tmp = X_original[cols_used].copy()
         tmp["_cluster_"] = labels
         grp = tmp.groupby("_cluster_")[cols_used].mean()
-        arr = grp.values.astype(float)
-        col_names = list(grp.columns)
-        row_names = [SEGMENT_LABELS.get(int(idx), f"Cluster {idx}") for idx in grp.index]
-        col_min = arr.min(axis=0)
-        col_max = arr.max(axis=0)
-        arr_norm = (arr - col_min) / (col_max - col_min + 1e-8)
-        profiles_norm = pd.DataFrame(arr_norm.astype(float), index=row_names, columns=col_names)
-        fig, ax = plt.subplots(figsize=(14, max(6, len(profiles_norm) * 0.8)))
+        row_names = [_segment_label(idx, segment_names) for idx in grp.index]
+
+        overall = X_original[cols_used].mean().replace(0, np.nan)
+        index_vs_avg = grp.divide(overall, axis=1).fillna(1.0).astype(float)
+        index_vs_avg.index = row_names
+
+        fig, ax = plt.subplots(figsize=(14, max(6, len(index_vs_avg) * 0.8)))
         sns.heatmap(
-            profiles_norm.astype(float),
-            annot=True, fmt=".2f", cmap="RdYlGn", ax=ax,
-            linewidths=0.5, cbar_kws={"label": "Normalised Value (0=Low, 1=High)"},
+            index_vs_avg,
+            annot=True, fmt=".2f", cmap="coolwarm", center=1.0, ax=ax,
+            linewidths=0.5,
+            cbar_kws={"label": "Segment average / all-customer average (1.0 = typical)"},
         )
         ax.set_title(
-            f"Plot S5: Customer Segment Profiles - {model_name} | Normalised average feature values per cluster",
+            f"Plot S5: Customer Segment Profiles - {model_name} | "
+            f"segment average relative to the average customer",
             fontsize=13
         )
         ax.set_ylabel("Segment", fontsize=11)
@@ -873,7 +939,10 @@ def plot_cluster_profiles(
         fig.savefig(GRAPHS_DIR / "seg_cluster_profiles.png", bbox_inches="tight", dpi=150)
         plt.close(fig)
         logger.info("Plot S5 saved: seg_cluster_profiles.png")
-        return pd.DataFrame(arr.astype(float), index=row_names, columns=col_names)
+
+        raw_means = grp.astype(float).copy()
+        raw_means.index = row_names
+        return raw_means
     except Exception as e:
         logger.error(f"plot_cluster_profiles failed: {e}", exc_info=True)
         plt.close("all")
@@ -884,9 +953,10 @@ def plot_segment_clv_heatmap(
     labels: np.ndarray,
     dollar_preds: np.ndarray,
     dollar_actual: np.ndarray,
+    segment_names: Optional[dict] = None,
 ) -> pd.DataFrame:
     """
-    Generates Plot S6: Segment × CLV tier heatmap.
+    Generates Plot S6: Segment x CLV tier heatmap.
 
     This is the most business-valuable output of the combined CLV + segmentation
     pipeline. It answers: "Which customer segments drive the most future revenue?"
@@ -895,31 +965,20 @@ def plot_segment_clv_heatmap(
     Cols = CLV tiers (from P1 CLV predictions)
     Values = percentage of customers in each cell
 
-    Example insight:
-        Cluster 1 → 80% Whale tier = "These are your VIP retention targets"
-        Cluster 3 → 90% Churned tier = "Don't waste retention budget here"
-
     Parameters
     ----------
-    labels        : K-Means cluster assignments
+    labels        : K-Means cluster assignments (test customers)
     dollar_preds  : CLV predicted dollar values (from P1 champion model)
     dollar_actual : actual dollar values (y_test_raw)
+    segment_names : {cluster number: segment name}
     """
-    def _get_clv_tier(dollar):
-        if dollar >= CLV_TIER_THRESHOLDS['Whale']:
-            return '🐋 Whale'
-        elif dollar >= CLV_TIER_THRESHOLDS['Mid']:
-            return '💰 Mid'
-        elif dollar >= CLV_TIER_THRESHOLDS['Low']:
-            return '📉 Low'
-        else:
-            return '💤 Churned'
+    GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
 
-    clv_tiers = [_get_clv_tier(d) for d in dollar_preds]
+    clv_tiers  = [_clv_tier_label(d) for d in dollar_preds]
     tier_order = ['🐋 Whale', '💰 Mid', '📉 Low', '💤 Churned']
 
     df = pd.DataFrame({
-        'Cluster': [SEGMENT_LABELS.get(l, f'Cluster {l}') for l in labels],
+        'Cluster': [_segment_label(l, segment_names) for l in labels],
         'CLV_Tier': clv_tiers,
         'CLV_Predicted': dollar_preds,
         'CLV_Actual': dollar_actual,
@@ -927,7 +986,6 @@ def plot_segment_clv_heatmap(
 
     # Percentage heatmap
     crosstab = pd.crosstab(df['Cluster'], df['CLV_Tier'], normalize='index') * 100
-    # Reorder columns
     crosstab = crosstab.reindex(columns=[t for t in tier_order if t in crosstab.columns])
 
     # Avg predicted CLV per cluster
@@ -947,7 +1005,7 @@ def plot_segment_clv_heatmap(
         vmin=0, vmax=100,
     )
     axes[0].set_title(
-        'Plot S6: Segment × CLV Tier Distribution (%)\n'
+        'Plot S6: Segment x CLV Tier Distribution (%)\n'
         'Row = Customer Segment, Col = CLV Tier',
         fontsize=13
     )
@@ -978,6 +1036,7 @@ def plot_segment_clv_heatmap(
 def plot_rfm_3d(
     X_original: pd.DataFrame,
     labels: np.ndarray,
+    segment_names: Optional[dict] = None,
 ) -> None:
     """
     Generates Plot S8: 3D RFM scatter plot coloured by cluster.
@@ -989,6 +1048,7 @@ def plot_rfm_3d(
         logger.warning("RFM 3D plot skipped - RFM columns not available.")
         return
 
+    GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(12, 8))
     ax  = fig.add_subplot(111, projection='3d')
 
@@ -996,7 +1056,7 @@ def plot_rfm_3d(
     for i, label in enumerate(unique_labels):
         mask  = labels == label
         color = '#888888' if label == -1 else CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
-        name  = 'Noise' if label == -1 else SEGMENT_LABELS.get(label, f'Cluster {label}')
+        name  = _segment_label(label, segment_names)
         ax.scatter(
             X_original.loc[mask, 'Recency'],
             X_original.loc[mask, 'Frequency'],
@@ -1004,9 +1064,9 @@ def plot_rfm_3d(
             c=color, label=name, alpha=0.6, s=20,
         )
 
-    ax.set_xlabel('Recency (days)', fontsize=10)
-    ax.set_ylabel('Frequency (invoices)', fontsize=10)
-    ax.set_zlabel('Monetary (avg order $)', fontsize=10)
+    ax.set_xlabel('Recency (days between first and last purchase)', fontsize=10)
+    ax.set_ylabel('Frequency (repeat purchase days)', fontsize=10)
+    ax.set_zlabel('Monetary (avg repeat order value)', fontsize=10)
     ax.set_title('Plot S8: RFM 3D Scatter - Customer Segments', fontsize=13)
     ax.legend(fontsize=8, loc='upper left')
     fig.tight_layout()
@@ -1021,12 +1081,16 @@ def plot_dbscan_map(
 ) -> None:
     """
     Generates Plot S10: DBSCAN cluster map with noise points highlighted.
-    Uses UMAP or t-SNE embedding for 2D positioning.
+    The embedding must have one row per customer (the UMAP embedding does).
     """
     if embedding is None:
         logger.info("Plot S10 skipped - no 2D embedding available.")
         return
+    if len(embedding) != len(dbscan_labels):
+        logger.warning("Plot S10 skipped - embedding and DBSCAN labels differ in length.")
+        return
 
+    GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(12, 8))
     unique = sorted(set(dbscan_labels))
 
@@ -1044,7 +1108,7 @@ def plot_dbscan_map(
 
     ax.set_title(
         'Plot S10: DBSCAN Clusters - Noise Points Highlighted in Red\n'
-        'Red × = customers that do not fit any dense neighborhood',
+        'Red x = customers that do not fit any dense neighborhood',
         fontsize=13
     )
     ax.set_xlabel('Embedding Dim 1', fontsize=11)
@@ -1069,11 +1133,13 @@ def assign_segments(
     pca=None,
     dollar_preds: Optional[np.ndarray] = None,
     customer_ids: Optional[pd.Series] = None,
+    segment_names: Optional[dict] = None,
+    feature_set: str = 'extended',
 ) -> pd.DataFrame:
     """
     Assigns segment labels to a DataFrame of customers.
 
-    Can be called on new customers at inference time - scaler and kmeans
+    Can be called on new customers at inference time - scaler, PCA and kmeans
     are pre-fitted on training data.
 
     Parameters
@@ -1082,14 +1148,19 @@ def assign_segments(
     kmeans_model  : fitted KMeans
     scaler        : fitted RobustScaler
     cols_used     : feature columns used during training
+    pca           : fitted PCA (KMeans was trained on PCA output)
     dollar_preds  : optional CLV predictions to append
     customer_ids  : optional customer ID series to include
+    segment_names : {cluster number: segment name}; falls back to SEGMENT_LABELS
+    feature_set   : the feature set used in training ('extended' or 'rfm')
 
     Returns
     -------
     result_df : DataFrame with Cluster, Segment_Name, CLV_Predicted columns
     """
-    X_scaled, _, _ = _prepare_features(X, scaler=scaler, fit_scaler=False)
+    X_scaled, _, _ = _prepare_features(
+        X, feature_set=feature_set, scaler=scaler, fit_scaler=False
+    )
     # Apply PCA if provided (KMeans was trained on PCA-reduced features)
     if pca is not None:
         X_for_kmeans = pca.transform(X_scaled)
@@ -1102,18 +1173,11 @@ def assign_segments(
         result.insert(0, 'Customer_ID', customer_ids.values)
 
     result['Cluster']      = labels
-    result['Segment_Name'] = [SEGMENT_LABELS.get(l, f'Cluster {l}') for l in labels]
+    result['Segment_Name'] = [_segment_label(l, segment_names) for l in labels]
 
     if dollar_preds is not None:
         result['CLV_Predicted_90d'] = np.round(dollar_preds, 2)
-
-        def _tier(d):
-            if d >= CLV_TIER_THRESHOLDS['Whale']:  return '🐋 Whale'
-            elif d >= CLV_TIER_THRESHOLDS['Mid']:   return '💰 Mid'
-            elif d >= CLV_TIER_THRESHOLDS['Low']:   return '📉 Low'
-            else:                                   return '💤 Churned'
-
-        result['CLV_Tier'] = [_tier(d) for d in dollar_preds]
+        result['CLV_Tier'] = [_clv_tier_label(d) for d in dollar_preds]
 
     return result
 
@@ -1124,13 +1188,15 @@ def save_segmentation_results(
     metrics: dict,
 ) -> None:
     """
-    Saves all segmentation outputs to GRAPHS_DIR and MODELS_DIR.
+    Saves all segmentation outputs to GRAPHS_DIR.
 
     Files saved:
     - customer_segments.csv     - customer-level assignments
     - segment_profiles.csv      - cluster-level profiles
     - segmentation_metrics.csv  - model evaluation scores
     """
+    GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+
     customer_df.to_csv(GRAPHS_DIR / 'customer_segments.csv', index=False)
     profiles.to_csv(GRAPHS_DIR / 'segment_profiles.csv')
 
@@ -1150,37 +1216,42 @@ def save_segmentation_results(
 # ===========================================================================
 
 def save_segmentation_bundle(
-    kmeans:     KMeans,
-    scaler:     RobustScaler,
-    pca:        PCA,
-    cols_used:  list,
-    optimal_k:  int,
-    metrics:    dict,
+    kmeans:        KMeans,
+    scaler:        RobustScaler,
+    pca:           PCA,
+    cols_used:     list,
+    optimal_k:     int,
+    metrics:       dict,
+    segment_names: Optional[dict] = None,
+    feature_set:   str = 'extended',
 ) -> None:
     """
     Serializes the segmentation bundle for Streamlit app and API inference.
 
     Bundle contents:
-    - kmeans       : fitted K-Means model
-    - scaler       : fitted RobustScaler
-    - pca          : fitted PCA (for visualization)
-    - cols_used    : feature columns
-    - optimal_k    : number of clusters
-    - metrics      : evaluation scores
-    - segment_labels: human-readable cluster names
-    - version      : model version string
-    - timestamp    : training timestamp
+    - kmeans         : fitted K-Means model
+    - scaler         : fitted RobustScaler
+    - pca            : fitted PCA (REQUIRED for inference: K-Means lives in PCA space)
+    - cols_used      : feature columns
+    - feature_set    : 'extended' or 'rfm'
+    - optimal_k      : number of clusters
+    - metrics        : evaluation scores
+    - segment_labels : {cluster number: name}, derived from the cluster profile
+    - version        : bundle version string
+    - timestamp      : training timestamp
     """
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     bundle = {
         'kmeans':          kmeans,
         'scaler':          scaler,
         'pca':             pca,
         'cols_used':       cols_used,
+        'feature_set':     feature_set,
         'optimal_k':       optimal_k,
         'metrics':         metrics,
-        'segment_labels':  SEGMENT_LABELS,
+        'segment_labels':  segment_names or SEGMENT_LABELS,
         'clv_thresholds':  CLV_TIER_THRESHOLDS,
-        'version':         '1.0.0',
+        'version':         '1.1.0',
         'timestamp':       pd.Timestamp.now().isoformat(),
     }
     output_path = MODELS_DIR / 'segmentation_bundle.pkl'
@@ -1210,6 +1281,7 @@ def run_segmentation_pipeline(
     - Prepare + scale features (RobustScaler)
     - PCA variance analysis + dimensionality reduction
     - K-Means find optimal k, fit primary segmentation
+    - Name the segments from their profile (average predicted CLV)
     - DBSCAN density-based clustering + outlier detection
     - GMM soft probabilistic assignments
     - Hierarchical agglomerative clustering + dendrogram
@@ -1219,26 +1291,38 @@ def run_segmentation_pipeline(
     - Segment x CLV heatmap business linkage to P1
     - RFM 3D scatter
     - DBSCAN noise map
-    - Save all results + bundle
+    - Save all results (CSVs + bundle)
 
     Parameters
     ----------
-    X_train       : training features (FEATURE_COLS)
-    X_test        : test features (FEATURE_COLS) - segmented customers
+    X_train       : training features (FEATURE_COLS), index = Customer ID
+    X_test        : test features (FEATURE_COLS), index = Customer ID
     y_test_raw    : actual dollar spend (test set)
-    dollar_preds  : CLV predictions from P1 champion model (optional)
-    customer_ids  : customer ID series for output CSV (optional)
+    dollar_preds  : CLV predictions from P1 champion model for X_test (optional)
+    customer_ids  : customer ID series for X_test (default: X_test.index)
     feature_set   : 'rfm' or 'extended' feature set
     tune_dbscan   : use Optuna to tune DBSCAN params (requires optuna)
     run_tsne      : compute t-SNE embedding (slow on large datasets)
 
     Returns
     -------
-    dict with keys: kmeans, labels, profiles, customer_df, metrics, embedding
+    dict with keys: kmeans, scaler, pca, labels, profiles, customer_df, metrics,
+    embedding, dbscan_labels, gmm_labels, hier_labels, cols_used, optimal_k,
+    segment_names
     """
     logger.info("=" * 70)
-    logger.info("[SEG] Starting Customer Segmentation Pipeline v1.0.0")
+    logger.info("[SEG] Starting Customer Segmentation Pipeline v1.1.0")
     logger.info("=" * 70)
+
+    if dollar_preds is not None and len(dollar_preds) != len(X_test):
+        raise ValueError(
+            f"dollar_preds has {len(dollar_preds)} values but X_test has "
+            f"{len(X_test)} customers; they must be aligned."
+        )
+
+    # Customer IDs live in the index of X_test (as text); use them by default
+    if customer_ids is None:
+        customer_ids = pd.Series(X_test.index, name='Customer_ID')
 
     # ------------------------------------------------------------------
     # Step 1: Feature preparation
@@ -1279,6 +1363,20 @@ def run_segmentation_pipeline(
     km_db  = davies_bouldin_score(X_pca, km_labels)
     km_ch  = calinski_harabasz_score(X_pca, km_labels)
 
+    # Name the segments from their PROFILE, not from the arbitrary cluster number
+    if dollar_preds is not None:
+        _pred_series  = pd.Series(np.asarray(dollar_preds, dtype=float))
+        _test_labels  = km_labels[n_train:]
+        segment_names = name_clusters(_pred_series.groupby(_test_labels).mean())
+    else:
+        segment_names = name_clusters(X_all.groupby(km_labels)['Monetary'].mean())
+    logger.info(f"Segment names (from cluster profile): {segment_names}")
+
+    profiles = profiles.copy()
+    profiles['Segment_Name'] = [
+        segment_names.get(int(c), f'Cluster {c}') for c in profiles.index
+    ]
+
     # ------------------------------------------------------------------
     # Step 5: DBSCAN
     # ------------------------------------------------------------------
@@ -1306,46 +1404,53 @@ def run_segmentation_pipeline(
     # Step 8: UMAP
     # ------------------------------------------------------------------
     logger.info("[SEG 8/13] UMAP embedding...")
-    umap_embedding = compute_umap_embedding(X_pca, km_labels, title_suffix="K-Means")
+    umap_embedding = compute_umap_embedding(
+        X_pca, km_labels, title_suffix="K-Means", segment_names=segment_names
+    )
 
     # ------------------------------------------------------------------
     # Step 9: t-SNE
     # ------------------------------------------------------------------
     if run_tsne:
         logger.info("[SEG 9/13] t-SNE embedding...")
-        tsne_embedding = compute_tsne_embedding(X_pca, km_labels, title_suffix="K-Means")
+        compute_tsne_embedding(
+            X_pca, km_labels, title_suffix="K-Means", segment_names=segment_names
+        )
     else:
-        tsne_embedding = None
         logger.info("[SEG 9/13] t-SNE skipped (run_tsne=False).")
 
     # ------------------------------------------------------------------
     # Step 10: Cluster profiles heatmap
     # ------------------------------------------------------------------
     logger.info("[SEG 10/13] Cluster profiles...")
-    plot_cluster_profiles(X_all, km_labels, cols_used, model_name="K-Means")
+    plot_cluster_profiles(
+        X_all, km_labels, cols_used, model_name="K-Means", segment_names=segment_names
+    )
 
     # ------------------------------------------------------------------
-    # Step 11: Segment × CLV heatmap (only if CLV predictions available)
+    # Step 11: Segment x CLV heatmap (only if CLV predictions available)
     # ------------------------------------------------------------------
-    logger.info("[SEG 11/13] Segment × CLV heatmap...")
+    logger.info("[SEG 11/13] Segment x CLV heatmap...")
     if dollar_preds is not None:
         # Use test-set labels only for CLV linkage
         test_labels   = km_labels[n_train:]
         dollar_actual = y_test_raw.values if hasattr(y_test_raw, 'values') else np.array(y_test_raw)
-        customer_df   = plot_segment_clv_heatmap(test_labels, dollar_preds, dollar_actual)
+        customer_df   = plot_segment_clv_heatmap(
+            test_labels, dollar_preds, dollar_actual, segment_names=segment_names
+        )
     else:
-        logger.info("CLV predictions not provided - Segment×CLV heatmap skipped.")
+        logger.info("CLV predictions not provided - Segment x CLV heatmap skipped.")
         customer_df = None
 
     # ------------------------------------------------------------------
     # Step 12: RFM 3D + DBSCAN map
     # ------------------------------------------------------------------
     logger.info("[SEG 12/13] RFM 3D scatter + DBSCAN map...")
-    plot_rfm_3d(X_all, km_labels)
+    plot_rfm_3d(X_all, km_labels, segment_names=segment_names)
 
-    embedding_for_dbscan = umap_embedding if umap_embedding is not None else tsne_embedding
-    if embedding_for_dbscan is not None:
-        plot_dbscan_map(embedding_for_dbscan, db_labels)
+    # Only the UMAP embedding has one row per customer (t-SNE is subsampled)
+    if umap_embedding is not None:
+        plot_dbscan_map(umap_embedding, db_labels)
 
     # ------------------------------------------------------------------
     # Step 13: Save results + bundle
@@ -1373,17 +1478,26 @@ def run_segmentation_pipeline(
             pca=pca,
             dollar_preds=dollar_preds,
             customer_ids=customer_ids,
+            segment_names=segment_names,
+            feature_set=feature_set,
         )
     else:
         assignment_df = None
 
-    save_segmentation_bundle(kmeans, scaler, pca, cols_used, optimal_k, all_metrics)
+    save_segmentation_bundle(
+        kmeans, scaler, pca, cols_used, optimal_k, all_metrics,
+        segment_names=segment_names, feature_set=feature_set,
+    )
+
+    if assignment_df is not None:
+        save_segmentation_results(assignment_df, profiles, all_metrics)
 
     # Summary print
     print(f"\n{'='*65}")
     print(f"  SEGMENTATION PIPELINE COMPLETE")
     print(f"{'='*65}")
     print(f"  Champion: K-Means (k={optimal_k})")
+    print(f"  Segment names        : {segment_names}")
     print(f"  Silhouette Score     : {km_sil:.4f}  (higher = better, max 1.0)")
     print(f"  Davies-Bouldin Index : {km_db:.4f}  (lower = better)")
     print(f"  Calinski-Harabasz    : {km_ch:.0f}  (higher = better)")
@@ -1392,23 +1506,24 @@ def run_segmentation_pipeline(
     print(f"  PCA components used  : {pca.n_components_} "
           f"({all_metrics['pca_variance_explained']*100:.1f}% variance)")
     print(f"{'='*65}")
-    print(f"\n  Plots saved to: {GRAPHS_DIR}")
+    print(f"\n  Plots and CSVs saved to: {GRAPHS_DIR}")
     print(f"  Bundle saved to: {MODELS_DIR / 'segmentation_bundle.pkl'}")
 
     logger.info("Segmentation pipeline complete.")
 
     return {
-        'kmeans':       kmeans,
-        'scaler':       scaler,
-        'pca':          pca,
-        'labels':       km_labels,
-        'profiles':     profiles,
-        'customer_df':  assignment_df,
-        'metrics':      all_metrics,
-        'embedding':    umap_embedding,
+        'kmeans':        kmeans,
+        'scaler':        scaler,
+        'pca':           pca,
+        'labels':        km_labels,
+        'profiles':      profiles,
+        'customer_df':   assignment_df,
+        'metrics':       all_metrics,
+        'embedding':     umap_embedding,
         'dbscan_labels': db_labels,
-        'gmm_labels':   gmm_labels,
-        'hier_labels':  hier_labels,
-        'cols_used':    cols_used,
-        'optimal_k':    optimal_k,
+        'gmm_labels':    gmm_labels,
+        'hier_labels':   hier_labels,
+        'cols_used':     cols_used,
+        'optimal_k':     optimal_k,
+        'segment_names': segment_names,
     }

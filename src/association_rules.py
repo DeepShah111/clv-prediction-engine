@@ -201,24 +201,22 @@ def _get_segment_customer_ids(
     segment_name: str,
     id_col: str = "Customer ID",
 ) -> Optional[set]:
-    """Returns set of CustomerIDs for a given segment name, or None for all."""
+    """Returns the set of Customer IDs (as integers) for a segment, or None for all."""
     if segment_name == "All" or customer_segments_df is None:
         return None
 
-    # Try to find CustomerID column
-    id_candidates = ["CustomerID", "Customer ID", "customer_id"]
+    id_candidates = ["Customer_ID", "CustomerID", "Customer ID", "customer_id"]
     seg_id_col = next((c for c in id_candidates if c in customer_segments_df.columns), None)
 
     if seg_id_col is None:
-        logger.warning("No CustomerID column found in segments DataFrame — using all customers.")
+        logger.warning("No customer ID column found in the segments table - segment skipped.")
         return None
 
     mask = customer_segments_df["Segment_Name"] == segment_name
-    ids  = set(customer_segments_df.loc[mask, seg_id_col].astype(int).tolist())
+    ids = pd.to_numeric(customer_segments_df.loc[mask, seg_id_col], errors="coerce").dropna()
+    ids = set(ids.astype(int).tolist())
     logger.info(f"Segment '{segment_name}': {len(ids):,} customers")
     return ids
-
-
 # ===========================================================================
 # FP-Growth / Apriori
 # ===========================================================================
@@ -264,45 +262,38 @@ def _run_fpgrowth(
 
 def _run_cooccurrence_fallback(basket: pd.DataFrame) -> pd.DataFrame:
     """
-    Manual co-occurrence fallback when mlxtend is unavailable.
-    Computes pairwise support, confidence, and lift for all product pairs.
-    Returns a DataFrame in the same format as mlxtend association_rules.
+    Manual pair counting when mlxtend is unavailable or fails.
+    Only products with support >= MIN_SUPPORT can be part of a frequent pair,
+    so the search is restricted to them. Returns the same columns as mlxtend.
     """
     logger.info("Running co-occurrence fallback...")
-    n_baskets  = len(basket)
-    products   = basket.columns.tolist()
-    arr        = basket.values.astype(np.float32)
+    support_all = basket.mean(axis=0)
+    frequent = support_all[support_all >= MIN_SUPPORT].index.tolist()
+    if len(frequent) < 2:
+        return pd.DataFrame()
 
-    # Support per product
+    arr = basket[frequent].values.astype(np.float32)      # 0/1 numbers
     support_single = arr.mean(axis=0)
 
     records = []
-    for i, p1 in enumerate(products):
-        for j, p2 in enumerate(products):
-            if i >= j:
-                continue
-            both      = (arr[:, i] & arr[:, j]).mean()
+    for i in range(len(frequent)):
+        for j in range(i + 1, len(frequent)):
+            both = float((arr[:, i] * arr[:, j]).mean())     # multiplication, not &
             if both < MIN_SUPPORT:
                 continue
-            conf_ij   = both / (support_single[i] + 1e-9)
-            conf_ji   = both / (support_single[j] + 1e-9)
-            lift      = both / (support_single[i] * support_single[j] + 1e-9)
-
-            if lift >= MIN_LIFT:
-                records.append({
-                    "antecedents": frozenset([p1]),
-                    "consequents": frozenset([p2]),
-                    "support": both,
-                    "confidence": conf_ij,
-                    "lift": lift,
-                })
-                records.append({
-                    "antecedents": frozenset([p2]),
-                    "consequents": frozenset([p1]),
-                    "support": both,
-                    "confidence": conf_ji,
-                    "lift": lift,
-                })
+            lift = both / (support_single[i] * support_single[j] + 1e-9)
+            if lift < MIN_LIFT:
+                continue
+            conf_ij = both / (support_single[i] + 1e-9)
+            conf_ji = both / (support_single[j] + 1e-9)
+            if conf_ij >= MIN_CONFIDENCE:
+                records.append({"antecedents": frozenset([frequent[i]]),
+                                "consequents": frozenset([frequent[j]]),
+                                "support": both, "confidence": conf_ij, "lift": lift})
+            if conf_ji >= MIN_CONFIDENCE:
+                records.append({"antecedents": frozenset([frequent[j]]),
+                                "consequents": frozenset([frequent[i]]),
+                                "support": both, "confidence": conf_ji, "lift": lift})
 
     if not records:
         return pd.DataFrame()
@@ -310,7 +301,6 @@ def _run_cooccurrence_fallback(basket: pd.DataFrame) -> pd.DataFrame:
     rules = pd.DataFrame(records).sort_values("lift", ascending=False).head(MAX_RULES)
     logger.info(f"Co-occurrence fallback: {len(rules):,} rules found")
     return rules
-
 
 # ===========================================================================
 # Cross-Sell Recommendation Engine
@@ -508,16 +498,17 @@ def plot_top_rules_bar(rules: pd.DataFrame, segment: str = "All", top_n: int = 2
 
 
 def plot_segment_comparison(
-    rules_champions: pd.DataFrame,
-    rules_loyal: pd.DataFrame,
+    rules_a: pd.DataFrame,
+    rules_b: pd.DataFrame,
+    names: tuple = ("Segment A", "Segment B"),
 ) -> None:
-    """Plot AR4: Side-by-side top rules for Champions vs Loyal Customers."""
+    """Plot AR4: side-by-side top rules for two customer segments."""
     fig, axes = plt.subplots(1, 2, figsize=(18, 8))
     fig.patch.set_facecolor("#0D0D0D")
 
     for ax, rules, seg, color in [
-        (axes[0], rules_champions, "Champions",       "#2E86AB"),
-        (axes[1], rules_loyal,     "Loyal Customers", "#5C4DB1"),
+        (axes[0], rules_a, names[0], "#2E86AB"),
+        (axes[1], rules_b, names[1], "#5C4DB1"),
     ]:
         ax.set_facecolor("#0D0D0D")
         if rules is None or len(rules) == 0:
@@ -546,12 +537,10 @@ def plot_segment_comparison(
         for spine in ax.spines.values():
             spine.set_color("#333")
 
-    plt.suptitle("Product Affinity — Champions vs Loyal Customers",
+    plt.suptitle("Product Affinity by Customer Segment",
                  color="white", fontsize=14, fontweight="bold", y=1.01)
     plt.tight_layout()
     _savefig("ar_segment_comparison.png")
-
-
 # ===========================================================================
 # Save Results
 # ===========================================================================
@@ -605,7 +594,7 @@ def save_ar_results(
     rec_rows = []
     for product, recs in lookup.items():
         for r in recs:
-            rec_rows.append({"product": product, **r})
+            rec_rows.append({"source_product": product, **r})
     if rec_rows:
         pd.DataFrame(rec_rows).to_csv(
             GRAPHS_DIR / "product_recommendations.csv", index=False
@@ -755,9 +744,12 @@ def run_association_rules_pipeline(
     plot_lift_heatmap(all_rules)
     plot_top_rules_bar(all_rules, "All Customers")
 
-    rules_champ = rules_by_segment.get("Champions", pd.DataFrame())
-    rules_loyal = rules_by_segment.get("Loyal Customers", pd.DataFrame())
-    plot_segment_comparison(rules_champ, rules_loyal)
+    seg_keys = [s for s in rules_by_segment if s != "All"]
+    rules_champ = rules_by_segment.get(seg_keys[0], pd.DataFrame()) if len(seg_keys) > 0 else pd.DataFrame()
+    rules_loyal = rules_by_segment.get(seg_keys[1], pd.DataFrame()) if len(seg_keys) > 1 else pd.DataFrame()
+    plot_segment_comparison(rules_champ, rules_loyal,
+                            names=(seg_keys[0] if len(seg_keys) > 0 else "Segment A",
+                                   seg_keys[1] if len(seg_keys) > 1 else "Segment B"))
 
     # ------------------------------------------------------------------
     # Step 7: Save
