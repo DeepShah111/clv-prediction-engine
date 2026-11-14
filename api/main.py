@@ -1,15 +1,34 @@
 """
-Customer Intelligence Platform — FastAPI Endpoint
-==================================================
-Production REST API for CLV prediction, customer segmentation,
-and anomaly detection.
+Customer Intelligence Platform — FastAPI Endpoint (v1.1.0)
+===========================================================
+REST API for CLV prediction, customer segmentation and anomaly detection.
 
 Endpoints
 ---------
-POST /predict-clv       → 90-day CLV prediction + segment + confidence range
-POST /segment-customer  → cluster assignment + segment name + profile
-POST /detect-anomaly    → anomaly score + risk level + business flags
-GET  /health            → model versions + bundle status + uptime
+POST /predict-clv       -> 90-day CLV prediction + value tier + indicative range
+POST /segment-customer  -> K-Means cluster assignment + segment name
+POST /detect-anomaly    -> Isolation Forest anomaly score + risk level + flags
+GET  /health            -> model versions + bundle status + uptime
+                           (answers HTTP 503 when any model failed to load)
+
+Configuration (environment variables, all optional)
+---------------------------------------------------
+CLV_API_KEY          if set, the three POST endpoints require the header X-API-Key
+CLV_ALLOWED_ORIGINS  comma-separated browser origins allowed by CORS (default "*")
+CLV_API_RELOAD       "1" enables auto-reload when this file is run directly
+CLV_BASE_DIR         project root that contains artifacts/ (default: repo root)
+
+Things to know
+--------------
+* Features that the caller does not send are filled with typical default values
+  (FEATURE_DEFAULTS). Nothing is derived from the features that ARE sent, so a
+  request with only three values is mostly a "default customer".
+* The CLV range is an indicative +-15% band around the prediction. It is NOT a
+  statistical confidence interval.
+* Anomaly scoring uses the Isolation Forest only (the autoencoder is not part of
+  the deployed bundle). The score is scaled with the min/max saved at training
+  time (bundle["norm"]). Older bundles without those values fall back to a
+  legacy approximation.
 
 Usage
 -----
@@ -26,8 +45,10 @@ Docs available at:
 import os
 import sys
 import logging
+import secrets
 import time
 import warnings
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -36,10 +57,10 @@ import numpy as np
 import pandas as pd
 import joblib
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 warnings.filterwarnings("ignore")
 
@@ -53,14 +74,18 @@ if str(_PROJECT) not in sys.path:
 
 os.environ.setdefault("CLV_BASE_DIR", str(_PROJECT))
 
-from src.config import MODELS_DIR, FEATURE_COLS, RANDOM_SEED
+from src.config import MODELS_DIR, FEATURE_COLS
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("clv_api")
 
 # ---------------------------------------------------------------------------
 # App constants
 # ---------------------------------------------------------------------------
-APP_VERSION     = "1.0.0"
+APP_VERSION     = "1.1.0"
 APP_START_TIME  = time.time()
 
 LOG_PRED_MAX    = 12.0
@@ -69,7 +94,11 @@ SEGMENT_P80     = 1_200.0
 
 ANOMALY_THRESHOLD     = 0.50
 RETURN_RATE_THRESHOLD = 0.30
+RECENT_PURCHASE_DAYS  = 30          # "recently active" = purchased within 30 days
 
+API_KEY = os.environ.get("CLV_API_KEY")          # None -> open API (demo mode)
+
+# Typical values used for any feature the caller does not send.
 FEATURE_DEFAULTS = {
     "Recency": 365.0, "Frequency": 4.0, "Monetary": 300.0,
     "Prob_Pred_Txn": 1.5, "Prob_Pred_Val": 280.0, "Prob_Alive": 0.65,
@@ -94,8 +123,9 @@ SEGMENT_LABELS = {
 
 class ModelRegistry:
     """
-    Singleton that loads all three model bundles at startup.
+    Holds the three model bundles loaded at startup.
     Exposes clv_model, seg_bundle, anomaly_bundle with version metadata.
+    A bundle that fails to load is reported by /health instead of crashing the server.
     """
 
     def __init__(self):
@@ -122,6 +152,7 @@ class ModelRegistry:
             }
             logger.info(f"CLV bundle loaded | {self._status['clv']}")
         except Exception as e:
+            self.clv_bundle = self.clv_model = None
             errors.append(f"CLV: {e}")
             self._status["clv"] = {"loaded": False, "error": str(e)}
 
@@ -130,12 +161,13 @@ class ModelRegistry:
         try:
             self.seg_bundle = joblib.load(seg_path)
             self._status["segmentation"] = {
-                "loaded":   True,
-                "version":  self.seg_bundle.get("version", "unknown"),
+                "loaded":    True,
+                "version":   self.seg_bundle.get("version", "unknown"),
                 "optimal_k": self.seg_bundle.get("optimal_k", "unknown"),
             }
             logger.info(f"Segmentation bundle loaded | {self._status['segmentation']}")
         except Exception as e:
+            self.seg_bundle = None
             errors.append(f"Segmentation: {e}")
             self._status["segmentation"] = {"loaded": False, "error": str(e)}
 
@@ -149,6 +181,7 @@ class ModelRegistry:
             }
             logger.info(f"Anomaly bundle loaded | {self._status['anomaly']}")
         except Exception as e:
+            self.anomaly_bundle = None
             errors.append(f"Anomaly: {e}")
             self._status["anomaly"] = {"loaded": False, "error": str(e)}
 
@@ -175,31 +208,43 @@ registry = ModelRegistry()
 # FastAPI App
 # ===========================================================================
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load all model bundles when the server starts."""
+    logger.info("FastAPI startup — loading model registry...")
+    registry.load()
+    logger.info("Model registry ready.")
+    yield
+
+
 app = FastAPI(
     title="Customer Intelligence Platform API",
     description=(
         "REST API for CLV prediction, customer segmentation, and anomaly detection. "
-        "Built on TwoStageRegressor (CatBoost) champion model v2.5.0."
+        "Champion CLV model: Two-Stage CatBoost."
     ),
     version=APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
+
+_allowed_origins = [
+    o.strip() for o in os.environ.get("CLV_ALLOWED_ORIGINS", "*").split(",") if o.strip()
+] or ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Load all model bundles when the server starts."""
-    logger.info("FastAPI startup — loading model registry...")
-    registry.load()
-    logger.info("Model registry ready.")
+def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Enforces the X-API-Key header, but only when CLV_API_KEY is configured."""
+    if API_KEY and not (x_api_key and secrets.compare_digest(x_api_key, API_KEY)):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
 # ===========================================================================
@@ -209,11 +254,12 @@ async def startup_event():
 class CustomerFeatures(BaseModel):
     """
     Customer feature input for CLV prediction and segmentation.
-    All fields are optional — missing values filled with training-set medians.
+    All fields are optional — missing values are filled with typical defaults.
+    Unknown or mistyped field names are rejected (HTTP 422).
     """
-    Recency:             Optional[float] = Field(None, ge=0,    description="Days since first purchase")
-    Frequency:           Optional[float] = Field(None, ge=0,    description="Number of invoices")
-    Monetary:            Optional[float] = Field(None, ge=0,    description="Average order value ($)")
+    Recency:             Optional[float] = Field(None, ge=0,    description="Days between first and last purchase")
+    Frequency:           Optional[float] = Field(None, ge=0,    description="Number of repeat-purchase days")
+    Monetary:            Optional[float] = Field(None, ge=0,    description="Average repeat-order value ($)")
     Prob_Pred_Txn:       Optional[float] = Field(None, ge=0,    description="BG/NBD predicted transactions")
     Prob_Pred_Val:       Optional[float] = Field(None, ge=0,    description="Gamma-Gamma predicted value")
     Prob_Alive:          Optional[float] = Field(None, ge=0, le=1, description="Probability customer is alive")
@@ -228,13 +274,13 @@ class CustomerFeatures(BaseModel):
     Monetary_Percentile: Optional[float] = Field(None, ge=0, le=1, description="Monetary percentile rank")
     Max_Single_Order:    Optional[float] = Field(None, ge=0,    description="Largest single order value ($)")
 
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "forbid"}
 
 
 class AnomalyFeatures(BaseModel):
     """
     Customer feature input for anomaly detection.
-    Uses the 12-feature anomaly subset.
+    Uses the 12-feature anomaly subset. Unknown field names are rejected (HTTP 422).
     """
     Recency:             Optional[float] = Field(None, ge=0)
     Frequency:           Optional[float] = Field(None, ge=0)
@@ -249,14 +295,14 @@ class AnomalyFeatures(BaseModel):
     Interpurchase_Std:   Optional[float] = Field(None, ge=0)
     Revenue_Per_Day:     Optional[float] = Field(None, ge=0)
 
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "forbid"}
 
 
 class CLVResponse(BaseModel):
     predicted_clv_90d:  float
-    clv_low:            float
-    clv_high:           float
-    segment:            str
+    clv_low:            float          # 85% of the prediction (indicative, not a confidence interval)
+    clv_high:           float          # 115% of the prediction
+    segment:            str            # CLV value tier label (Whale / Mid / Low / Churned)
     segment_key:        str
     log_prediction:     float
     model_version:      str
@@ -266,9 +312,9 @@ class CLVResponse(BaseModel):
 class SegmentResponse(BaseModel):
     cluster_id:         int
     segment_name:       str
-    silhouette_score:   float
+    silhouette_score:   float          # overall quality of the segmentation model (same for every customer)
     optimal_k:          int
-    feature_profile:    Dict[str, float]
+    feature_profile:    Dict[str, float]   # the customer's own values for the clustering features
     model_version:      str
 
 
@@ -324,6 +370,20 @@ def _require_bundle(bundle, name: str) -> None:
         )
 
 
+def _normalise_if_score(raw: float, bundle: dict) -> float:
+    """
+    Scales a raw Isolation Forest score (higher = more anomalous) to [0, 1] with the
+    SAME min/max that was used at training time (bundle["norm"]).
+    Bundles trained before that fix have no saved values; for them a legacy
+    approximation (raw / 0.5) is used.
+    """
+    norm = bundle.get("norm") or {}
+    lo, hi = norm.get("if_min"), norm.get("if_max")
+    if lo is not None and hi is not None and hi > lo:
+        return float(np.clip((raw - lo) / (hi - lo), 0.0, 1.0))
+    return float(np.clip(raw / 0.5, 0.0, 1.0))
+
+
 # ===========================================================================
 # Endpoints
 # ===========================================================================
@@ -332,30 +392,36 @@ def _require_bundle(bundle, name: str) -> None:
 async def health_check():
     """
     Returns model versions, bundle load status, and API uptime.
-    Use this to verify all models are loaded before sending predictions.
+    Answers HTTP 503 (status "degraded") when any model failed to load, so that
+    Docker health checks and load balancers can detect the problem.
     """
     uptime = round(time.time() - APP_START_TIME, 2)
-    all_loaded = all(
+    all_loaded = bool(registry.status) and all(
         v.get("loaded", False) for v in registry.status.values()
     )
-    return HealthResponse(
-        status    = "healthy" if all_loaded else "degraded",
-        api_version = APP_VERSION,
+    payload = HealthResponse(
+        status         = "healthy" if all_loaded else "degraded",
+        api_version    = APP_VERSION,
         uptime_seconds = uptime,
-        models    = registry.status,
-        timestamp = datetime.now(timezone.utc).isoformat(),
+        models         = registry.status,
+        timestamp      = datetime.now(timezone.utc).isoformat(),
+    )
+    return JSONResponse(
+        status_code=200 if all_loaded else 503,
+        content=payload.model_dump(),
     )
 
 
-@app.post("/predict-clv", response_model=CLVResponse, tags=["Prediction"])
-async def predict_clv(customer: CustomerFeatures):
+@app.post("/predict-clv", response_model=CLVResponse, tags=["Prediction"],
+          dependencies=[Depends(require_api_key)])
+def predict_clv(customer: CustomerFeatures):
     """
     Predicts 90-day Customer Lifetime Value.
 
-    - Missing features filled with training-set medians
-    - Returns dollar CLV + ±15% confidence range
-    - Segment assigned based on predicted spend thresholds:
-      Whale ≥ $1,200 | Mid $150–$1,200 | Low $0.01–$150 | Churned $0
+    - Missing features are filled with typical default values
+    - Returns dollar CLV + an indicative +-15% range (not a confidence interval)
+    - Value tier from the predicted spend:
+      Whale >= $1,200 | Mid $150-$1,200 | Low $0.01-$150 | Churned $0
     """
     _require_bundle(registry.clv_model, "CLV")
 
@@ -363,8 +429,9 @@ async def predict_clv(customer: CustomerFeatures):
 
     try:
         log_pred = float(np.clip(registry.clv_model.predict(feature_row), 0, LOG_PRED_MAX)[0])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+    except Exception:
+        logger.exception("CLV prediction failed")
+        raise HTTPException(status_code=500, detail="Prediction failed. See server logs.")
 
     dollar   = float(np.expm1(log_pred))
     clv_low  = round(max(0.0, dollar * 0.85), 2)
@@ -384,13 +451,15 @@ async def predict_clv(customer: CustomerFeatures):
     )
 
 
-@app.post("/segment-customer", response_model=SegmentResponse, tags=["Segmentation"])
-async def segment_customer(customer: CustomerFeatures):
+@app.post("/segment-customer", response_model=SegmentResponse, tags=["Segmentation"],
+          dependencies=[Depends(require_api_key)])
+def segment_customer(customer: CustomerFeatures):
     """
     Assigns a customer to a behavioural segment using K-Means.
 
-    Returns cluster ID, segment name, and the customer's feature profile
-    relative to cluster centroids.
+    Returns the cluster ID, the segment name stored in the bundle, the overall
+    silhouette score of the segmentation model, and the customer's own values for
+    the features used by the clustering model.
     """
     _require_bundle(registry.seg_bundle, "Segmentation")
 
@@ -412,39 +481,42 @@ async def segment_customer(customer: CustomerFeatures):
     available = [c for c in cols_used if c in input_df.columns]
     X_sub     = input_df[available].fillna(
         {c: FEATURE_DEFAULTS.get(c, 0.0) for c in available}
-    ).values.astype(np.float32)
+    )
 
     try:
         X_scaled = scaler.transform(X_sub)
         if pca is not None:
             X_scaled = pca.transform(X_scaled)
         cluster_id = int(kmeans.predict(X_scaled)[0])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Segmentation failed: {e}")
+    except Exception:
+        logger.exception("Segmentation failed")
+        raise HTTPException(status_code=500, detail="Segmentation failed. See server logs.")
 
-    # Segment name from bundle labels or fallback
     seg_name = labels.get(cluster_id, f"Cluster {cluster_id}")
 
     return SegmentResponse(
-        cluster_id      = cluster_id,
-        segment_name    = seg_name,
+        cluster_id       = cluster_id,
+        segment_name     = seg_name,
         silhouette_score = round(float(metrics.get("silhouette", 0)), 4),
-        optimal_k       = int(bundle.get("optimal_k", 2)),
-        feature_profile = {k: round(float(row.get(k, 0)), 4) for k in available},
-        model_version   = bundle.get("version", "unknown"),
+        optimal_k        = int(bundle.get("optimal_k", 2)),
+        feature_profile  = {k: round(float(row.get(k, 0)), 4) for k in available},
+        model_version    = bundle.get("version", "unknown"),
     )
 
 
-@app.post("/detect-anomaly", response_model=AnomalyResponse, tags=["Anomaly"])
-async def detect_anomaly(customer: AnomalyFeatures):
+@app.post("/detect-anomaly", response_model=AnomalyResponse, tags=["Anomaly"],
+          dependencies=[Depends(require_api_key)])
+def detect_anomaly(customer: AnomalyFeatures):
     """
-    Scores a customer for anomalous behaviour using Isolation Forest.
+    Scores a customer for anomalous behaviour using the Isolation Forest.
 
     Returns:
-    - anomaly_score [0–1]: higher = more anomalous
-    - risk_level: 🔴 High (≥0.65) | 🟡 Medium (≥0.40) | 🟢 Low (<0.40)
-    - is_anomaly: True if score ≥ 0.50
+    - anomaly_score [0-1]: higher = more anomalous (scaled with the training min/max)
+    - risk_level: High (>=0.65) | Medium (>=0.40) | Low (<0.40)
+    - is_anomaly: True if score >= 0.50
     - is_high_return: True if Return_Rate > 0.30 AND score > 0.40
+    - flags.is_whale: Monetary_Percentile > 0.90
+    - flags.is_suspicious: high return AND anomaly AND purchased within the last 30 days
     """
     _require_bundle(registry.anomaly_bundle, "Anomaly")
 
@@ -464,19 +536,20 @@ async def detect_anomaly(customer: AnomalyFeatures):
         if val is not None and field in row:
             row[field] = val
 
-    X = pd.DataFrame([row])[cols].fillna(0).values.astype(np.float32)
+    X = pd.DataFrame([row])[cols].fillna(0)
 
     try:
         X_scaled = scaler.transform(X)
         raw_if   = float(-if_model.decision_function(X_scaled)[0])
-        # Normalise using the same approach as training (~0.5 scale factor)
-        if_score = float(np.clip(raw_if / 0.5, 0.0, 1.0))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Anomaly scoring failed: {e}")
+        if_score = _normalise_if_score(raw_if, bundle)
+    except Exception:
+        logger.exception("Anomaly scoring failed")
+        raise HTTPException(status_code=500, detail="Anomaly scoring failed. See server logs.")
 
-    combined      = if_score   # AE stripped for deployment compat
-    return_rate   = float(row.get("Return_Rate", 0.0))
-    is_anomaly    = combined >= anomaly_threshold
+    combined       = if_score          # Isolation Forest only (autoencoder not deployed)
+    return_rate    = float(row.get("Return_Rate", 0.0))
+    days_since     = float(row.get("Days_Since_Purchase", 999.0))
+    is_anomaly     = combined >= anomaly_threshold
     is_high_return = (return_rate > return_threshold) and (combined > high_return_score_min)
 
     if combined >= 0.65:
@@ -487,16 +560,16 @@ async def detect_anomaly(customer: AnomalyFeatures):
         risk = "🟢 Low"
 
     return AnomalyResponse(
-        anomaly_score = round(combined, 4),
-        if_score      = round(if_score, 4),
-        risk_level    = risk,
-        is_anomaly    = is_anomaly,
-        is_high_return = is_high_return,
+        anomaly_score  = round(combined, 4),
+        if_score       = round(if_score, 4),
+        risk_level     = risk,
+        is_anomaly     = bool(is_anomaly),
+        is_high_return = bool(is_high_return),
         flags = {
-            "is_anomaly":     is_anomaly,
-            "is_high_return": is_high_return,
+            "is_anomaly":     bool(is_anomaly),
+            "is_high_return": bool(is_high_return),
             "is_whale":       float(row.get("Monetary_Percentile", 0)) > 0.90,
-            "is_suspicious":  is_high_return and is_anomaly and float(row.get("Recency", 999)) < 30,
+            "is_suspicious":  bool(is_high_return and is_anomaly and days_since < RECENT_PURCHASE_DAYS),
         },
         model_version = bundle.get("version", "unknown"),
     )
@@ -513,7 +586,7 @@ async def log_requests(request: Request, call_next):
     duration = round((time.time() - start) * 1000, 2)
     logger.info(
         f"{request.method} {request.url.path} "
-        f"→ {response.status_code} ({duration}ms)"
+        f"-> {response.status_code} ({duration}ms)"
     )
     return response
 
@@ -524,4 +597,9 @@ async def log_requests(request: Request, call_next):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=os.environ.get("CLV_API_RELOAD", "0") == "1",
+    )

@@ -1,8 +1,16 @@
 """
-Customer Intelligence Platform v3.1.0
+Customer Intelligence Platform v3.2.0
 ======================================
-Visual refresh — cleaner, more professional appearance.
-All functions and logic identical to v3.0.0.
+Changes vs v3.1.0
+- Tab 1 report stays visible when sliders change (st.session_state)
+- Anomaly score uses the min/max saved at training time (bundle["norm"]);
+  older bundles fall back to a legacy approximation
+- Failures are logged and shown as "Unknown" instead of looking like "Low risk"
+- Batch tab: vectorised scoring, warning about features filled with defaults,
+  customer ID shown in the preview
+- Typed numbers that go stale after retraining (R2, "400K", k-selection text) removed
+  or computed from the saved files
+- use_container_width replaced by width="stretch" (needs Streamlit >= 1.50)
 """
 
 import os, io, sys, warnings, logging
@@ -17,6 +25,7 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 logging.getLogger("shap").setLevel(logging.ERROR)
+logger = logging.getLogger("clv_app")
 
 try:
     import shap
@@ -39,22 +48,29 @@ SEGMENT_P80  = 1_200.0
 LOG_PRED_MAX = 12.0
 
 RISK_COLOURS = {
-    "🔴 High":   "#E63946",
-    "🟡 Medium": "#F4A261",
-    "🟢 Low":    "#2A9D8F",
+    "🔴 High":    "#E63946",
+    "🟡 Medium":  "#F4A261",
+    "🟢 Low":     "#2A9D8F",
+    "⚪ Unknown": "#8892a4",
 }
 SEG_COLOURS = {
-    "🏆 Champions":          "#FFD700",
+    "High-Value Customers":   "#5C4DB1",
+    "Regular Customers":      "#2E86AB",
+    "Mid-Value Customers":    "#2A9D8F",
+    "Low-Value Customers":    "#F4A261",
+    # names used by older bundles
+    "Champions":              "#2E86AB",
+    "Loyal Customers":        "#5C4DB1",
+    "🏆 Champions":           "#FFD700",
     "🐋 Dormant Whales":      "#5C4DB1",
     "📈 Growing Mid-Tier":    "#2A9D8F",
     "🔁 High-Freq Low-Value": "#F4A261",
     "💤 Lost Customers":      "#E63946",
     "🐋 Loyal Customers":     "#5C4DB1",
     "👥 Champions":           "#2E86AB",
-    "Champions":              "#2E86AB",
-    "Loyal Customers":        "#5C4DB1",
 }
 
+# Typical values used for any feature that is not supplied (batch uploads).
 FEATURE_DEFAULTS = {
     "Recency": 365.0, "Frequency": 4.0, "Monetary": 300.0,
     "Prob_Pred_Txn": 1.5, "Prob_Pred_Val": 280.0, "Prob_Alive": 0.65,
@@ -187,7 +203,7 @@ st.markdown("""
 
 
 # =============================================================================
-# Cached Loaders  (identical to v3.0.0)
+# Cached Loaders
 # =============================================================================
 
 @st.cache_resource(show_spinner="Loading models…")
@@ -229,7 +245,7 @@ def _img(name):
 
 
 # =============================================================================
-# Helpers  (identical to v3.0.0)
+# Helpers
 # =============================================================================
 
 def _build_row(overrides):
@@ -238,6 +254,7 @@ def _build_row(overrides):
 def _predict_clv(model, row):
     log_pred = float(np.clip(model.predict(row), 0, LOG_PRED_MAX)[0])
     dollar   = float(np.expm1(log_pred))
+    # NOTE: the range is an indicative +-15% band, not a statistical confidence interval.
     return {"log": log_pred, "dollar": dollar,
             "low": max(0.0, dollar * 0.85), "high": dollar * 1.15}
 
@@ -248,6 +265,7 @@ def _clv_tier(dollar):
     else:                      return "🐋 Whale",     "#5C4DB1"
 
 def _assign_cluster(row_df, bundle):
+    """Segment of ONE customer (row_df has one row). Returns (cluster_id, name)."""
     if bundle is None:
         return None, "Unknown"
     try:
@@ -257,37 +275,94 @@ def _assign_cluster(row_df, bundle):
         kmeans = bundle["kmeans"]
         labels = bundle.get("segment_labels", {})
         avail  = [c for c in cols if c in row_df.columns]
-        X      = row_df[avail].fillna(0).values.astype(np.float32)
-        Xs     = scaler.transform(X)
+        Xs     = scaler.transform(row_df[avail].fillna(0))
         if pca is not None:
             Xs = pca.transform(Xs)
-        cid  = int(kmeans.predict(Xs)[0])
+        cid = int(kmeans.predict(Xs)[0])
         return cid, labels.get(cid, f"Cluster {cid}")
     except Exception:
+        logger.exception("Segment assignment failed")
         return None, "Unknown"
 
-def _score_anomaly(bundle, feature_dict):
+def _assign_clusters_batch(df, bundle):
+    """Segment names for MANY customers at once (vectorised)."""
     if bundle is None:
-        return {"score": 0.0, "risk": "🟢 Low", "is_anomaly": False}
+        return ["Unknown"] * len(df)
+    try:
+        cols   = bundle["cols_used"]
+        scaler = bundle["scaler"]
+        pca    = bundle.get("pca")
+        kmeans = bundle["kmeans"]
+        labels = bundle.get("segment_labels", {})
+        avail  = [c for c in cols if c in df.columns]
+        Xs     = scaler.transform(df[avail].fillna(0))
+        if pca is not None:
+            Xs = pca.transform(Xs)
+        ids = kmeans.predict(Xs)
+        return [labels.get(int(i), f"Cluster {int(i)}") for i in ids]
+    except Exception:
+        logger.exception("Batch segment assignment failed")
+        return ["Unknown"] * len(df)
+
+def _normalise_if_score(raw, bundle):
+    """
+    Scales raw Isolation Forest scores (higher = more anomalous) to [0, 1] with the
+    SAME min/max used at training time (bundle["norm"]). Bundles trained before that
+    fix have no saved values and use a legacy approximation (raw / 0.5).
+    Works on a single number or on an array.
+    """
+    norm = bundle.get("norm") or {}
+    lo, hi = norm.get("if_min"), norm.get("if_max")
+    if lo is not None and hi is not None and hi > lo:
+        return np.clip((raw - lo) / (hi - lo), 0.0, 1.0)
+    return np.clip(raw / 0.5, 0.0, 1.0)
+
+def _risk_label(score, short=False):
+    if score >= 0.65:
+        return "🔴 High"
+    if score >= 0.40:
+        return "🟡 Med" if short else "🟡 Medium"
+    return "🟢 Low"
+
+def _score_anomaly(bundle, feature_dict):
+    """Isolation-Forest-only risk indicator for ONE customer."""
+    if bundle is None:
+        return {"score": 0.0, "risk": "⚪ Unknown", "is_anomaly": False,
+                "is_high_return": False, "error": True}
     try:
         cols     = bundle["cols_used"]
         scaler   = bundle["scaler"]
         if_model = bundle["isolation_forest"]
         thresh   = bundle.get("thresholds", {})
         row      = pd.DataFrame([{c: feature_dict.get(c, FEATURE_DEFAULTS.get(c, 0)) for c in cols}])
-        X        = scaler.transform(row.fillna(0).values.astype(np.float32))
+        X        = scaler.transform(row.fillna(0))
         raw      = float(-if_model.decision_function(X)[0])
-        score    = float(np.clip(raw / 0.5, 0, 1))
-        risk     = "🔴 High" if score >= 0.65 else ("🟡 Medium" if score >= 0.40 else "🟢 Low")
+        score    = float(_normalise_if_score(raw, bundle))
         return {
             "score":          round(score, 4),
-            "risk":           risk,
+            "risk":           _risk_label(score),
             "is_anomaly":     score >= thresh.get("anomaly_score", 0.50),
-            "is_high_return": (feature_dict.get("Return_Rate", 0) > thresh.get("return_rate", 0.30)
-                               and score > 0.40),
+            "is_high_return": bool(feature_dict.get("Return_Rate", 0) > thresh.get("return_rate", 0.30)
+                                   and score > thresh.get("high_return_min", 0.40)),
+            "error":          False,
         }
     except Exception:
-        return {"score": 0.0, "risk": "🟢 Low", "is_anomaly": False}
+        logger.exception("Anomaly scoring failed")
+        return {"score": 0.0, "risk": "⚪ Unknown", "is_anomaly": False,
+                "is_high_return": False, "error": True}
+
+def _score_anomaly_batch(bundle, df):
+    """Isolation-Forest-only scores for MANY customers (vectorised)."""
+    try:
+        cols = bundle["cols_used"]
+        X = df.reindex(columns=cols)
+        for c in cols:
+            X[c] = X[c].fillna(FEATURE_DEFAULTS.get(c, 0))
+        raw = -bundle["isolation_forest"].decision_function(bundle["scaler"].transform(X))
+        return np.asarray(_normalise_if_score(raw, bundle), dtype=float)
+    except Exception:
+        logger.exception("Batch anomaly scoring failed")
+        return np.full(len(df), np.nan)
 
 def _get_recommendations(ar_bundle, product_query, top_n=5):
     if ar_bundle is None or not product_query:
@@ -296,10 +371,12 @@ def _get_recommendations(ar_bundle, product_query, top_n=5):
     q       = product_query.upper()
     if q in lookup:
         return lookup[q][:top_n]
-    matches = [k for k in lookup if q in k]
+    matches = [k for k in lookup
+               if isinstance(k, str) and not k.startswith("frozenset") and q in k]
     return lookup[matches[0]][:top_n] if matches else []
 
 def _batch_predict(model, df):
+    df = df.copy()                                   # never modify the caller's table
     for col in FEATURE_COLS:
         if col not in df.columns:
             df[col] = FEATURE_DEFAULTS.get(col, 0.0)
@@ -326,6 +403,7 @@ def _shap_fig(model, row):
         plt.tight_layout()
         return fig
     except Exception as e:
+        logger.exception("SHAP chart failed")
         st.caption(f"SHAP chart unavailable ({type(e).__name__}).")
         return None
 
@@ -364,7 +442,7 @@ model          = clv_bundle["model"]
 # =============================================================================
 with st.sidebar:
     st.markdown("## Customer Intelligence")
-    st.markdown("##### Platform v3.1.0")
+    st.markdown("##### Platform v3.2.0")
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
 
     st.markdown("**Models**")
@@ -388,11 +466,10 @@ with st.sidebar:
 
     st.markdown("<hr style='border-color:#1e2d4a;margin:12px 0'>", unsafe_allow_html=True)
     v = clv_bundle.get("version", "?")
-    t = clv_bundle.get("timestamp", "unknown")
+    t = str(clv_bundle.get("timestamp", "unknown"))
     st.markdown(
         f"<small style='color:#556070'>"
-        f"Model v{v} · {t[:10] if t != 'unknown' else '?'}<br>"
-        f"Dollar R² = 0.581"
+        f"Model v{v} · {t[:10] if t != 'unknown' else '?'}"
         f"</small>",
         unsafe_allow_html=True,
     )
@@ -426,13 +503,17 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
 
     st.markdown("#### Customer Profile")
-    st.caption("Adjust the key inputs. All 5 models run on a single click.")
+    st.caption(
+        "Enter the customer's features by hand — all 16 are inputs (none are derived from the others), "
+        "so use a realistic combination. One click runs the CLV model, the segment model and the "
+        "anomaly model; SHAP explains the CLV."
+    )
 
     # ── Primary inputs (always visible) ──────────────────────────────────────
     p1, p2, p3 = st.columns(3)
     with p1:
-        recency   = st.slider("Recency (days since first purchase)", 1, 730, 180, 10)
-        frequency = st.slider("Frequency (invoices)", 1, 100, 8, 1)
+        recency   = st.slider("Recency (days between first and last purchase)", 1, 730, 180, 10)
+        frequency = st.slider("Frequency (repeat-purchase days)", 1, 100, 8, 1)
     with p2:
         monetary    = st.slider("Monetary — avg order value ($)", 10.0, 5000.0, 450.0, 10.0)
         days_since  = st.slider("Days since last purchase", 1, 365, 45, 1)
@@ -459,11 +540,12 @@ with tab1:
 
     analyze_btn = st.button(
         "🚀 Run Intelligence Analysis",
-        type="primary", use_container_width=True
+        type="primary", width="stretch"
     )
 
+    # Keep the inputs of the last click, so the report does not vanish when a slider moves
     if analyze_btn:
-        overrides = {
+        st.session_state["report_inputs"] = {
             "Recency": float(recency), "Frequency": float(frequency),
             "Monetary": float(monetary), "Return_Rate": float(return_rate),
             "Days_Since_Purchase": float(days_since), "Max_Single_Order": float(max_order),
@@ -473,6 +555,10 @@ with tab1:
             "Prob_Alive": float(prob_alive), "Prob_Pred_Txn": float(prob_txn),
             "Prob_Pred_Val": float(prob_val), "Visit_Diversity": float(visit_div),
         }
+
+    overrides = st.session_state.get("report_inputs")
+
+    if overrides:
         row = _build_row(overrides)
 
         # ── Run all models ────────────────────────────────────────────────────
@@ -483,6 +569,7 @@ with tab1:
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("#### Intelligence Report")
+        st.caption("Shows the inputs of your last click on “Run Intelligence Analysis”. Click it again after changing sliders.")
 
         # ── 4 result cards ────────────────────────────────────────────────────
         rc1, rc2, rc3, rc4 = st.columns(4)
@@ -490,7 +577,7 @@ with tab1:
             _result_card(
                 "Predicted 90-Day CLV",
                 f"${clv_result['dollar']:,.2f}",
-                f"Range: ${clv_result['low']:,.0f} – ${clv_result['high']:,.0f}",
+                f"Indicative range (±15%): ${clv_result['low']:,.0f} – ${clv_result['high']:,.0f}",
                 accent=tcolor,
             )
         with rc2:
@@ -510,10 +597,12 @@ with tab1:
             )
         with rc4:
             risk_color = RISK_COLOURS.get(anomaly_result["risk"], "#2A9D8F")
+            score_text = ("Score unavailable (see server log)" if anomaly_result.get("error")
+                          else f"Score: {anomaly_result['score']:.3f}  [0 = normal, 1 = extreme]")
             _result_card(
                 "Anomaly Risk",
                 anomaly_result["risk"],
-                f"Score: {anomaly_result['score']:.3f}  [0 = normal, 1 = extreme]",
+                score_text,
                 accent=risk_color,
             )
 
@@ -524,7 +613,7 @@ with tab1:
             "⚠️ Anomalous":      (anomaly_result.get("is_anomaly", False), "#E63946"),
             "🔁 High Return":    (anomaly_result.get("is_high_return", False), "#F4A261"),
             "💤 Churn Risk":     (clv_result["dollar"] < 10,             "#E63946"),
-            "📈 Growth Signal":  (frequency >= 5 and monetary >= 200,    "#2A9D8F"),
+            "📈 Growth Signal":  (overrides["Frequency"] >= 5 and overrides["Monetary"] >= 200, "#2A9D8F"),
         }
         pills = "".join([
             f'<span class="flag-pill" style="background:{"" + c + "cc" if v else "#1e2d4a"};'
@@ -544,10 +633,14 @@ with tab1:
         shap_col, feat_col = st.columns([3, 2])
         with shap_col:
             st.markdown("##### Why this CLV? — SHAP")
+            st.caption(
+                "Explains the spend amount if the customer spends. The final CLV also takes into "
+                "account the probability that the customer spends at all."
+            )
             if SHAP_AVAILABLE:
                 fig = _shap_fig(model, row)
                 if fig:
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig)
                     plt.close(fig)
                 else:
                     st.info("SHAP waterfall unavailable for this model type.")
@@ -561,7 +654,7 @@ with tab1:
                 "RFM" if x in ["Recency", "Frequency", "Monetary"]
                 else ("Behavioural" if x in ["Return_Rate", "Avg_Basket_Size", "Unique_Products"]
                 else "Derived"))
-            st.dataframe(feat_df, use_container_width=True, height=400)
+            st.dataframe(feat_df, width="stretch", height=400)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -569,29 +662,37 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.markdown("#### Segmentation Lab")
-    st.caption("Statistical cluster analysis — how k=2 was selected and what each segment means.")
+    st.caption("Statistical cluster analysis — how the number of segments was selected and what each segment means.")
 
     # ── k-selection table ─────────────────────────────────────────────────────
     rs_metrics_df = load_csv("richer_seg_metrics.csv")
-    if rs_metrics_df is not None:
+    cols_show = ["k", "silhouette", "davies_bouldin", "calinski_harabasz", "composite_score"]
+    if rs_metrics_df is not None and set(cols_show).issubset(rs_metrics_df.columns):
         st.markdown("**K-Selection Results**")
 
         def _hl(row):
             is_best = row["composite_score"] == rs_metrics_df["composite_score"].max()
             return ["background-color:#2A9D8F18;font-weight:700" if is_best else "" for _ in row]
 
-        cols_show = ["k", "silhouette", "davies_bouldin", "calinski_harabasz", "composite_score"]
         styled = (rs_metrics_df[cols_show].style
                   .apply(_hl, axis=1)
                   .format({"silhouette": "{:.4f}", "davies_bouldin": "{:.4f}",
                            "calinski_harabasz": "{:.0f}", "composite_score": "{:.4f}"}))
-        st.dataframe(styled, use_container_width=True)
-        st.info("k=2 has the highest composite score. Silhouette drops from 0.53 → 0.35 as k increases — splitting further adds noise, not insight.")
+        st.dataframe(styled, width="stretch")
+
+        _sorted  = rs_metrics_df.sort_values("k")
+        best_k   = int(rs_metrics_df.loc[rs_metrics_df["composite_score"].idxmax(), "k"])
+        st.info(
+            f"k={best_k} has the highest composite score "
+            f"(50% silhouette, 25% Davies-Bouldin, 25% Calinski-Harabasz, each rescaled across the k values tested). "
+            f"Silhouette goes from {_sorted['silhouette'].iloc[0]:.2f} at k={int(_sorted['k'].iloc[0])} "
+            f"to {_sorted['silhouette'].iloc[-1]:.2f} at k={int(_sorted['k'].iloc[-1])}."
+        )
 
     k_plot = _img("rs_k_comparison.png")
     if k_plot:
-        st.image(str(k_plot), caption="Metrics across k=2..5 — dashed line marks optimal k",
-                 use_container_width=True)
+        st.image(str(k_plot), caption="Metrics across k — dashed line marks the selected k",
+                 width="stretch")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
     st.markdown("**Cluster Visualisations**")
@@ -599,31 +700,34 @@ with tab2:
     c1, c2 = st.columns(2)
     with c1:
         p = _img("seg_umap.png") or _img("rs_umap_5seg.png")
-        if p: st.image(str(p), caption="UMAP — Cluster Map", use_container_width=True)
+        if p: st.image(str(p), caption="UMAP — Cluster Map", width="stretch")
     with c2:
         p = _img("seg_clv_heatmap.png")
-        if p: st.image(str(p), caption="Segment × CLV Tier Heatmap", use_container_width=True)
+        if p: st.image(str(p), caption="Segment × CLV Tier Heatmap", width="stretch")
 
     c3, c4 = st.columns(2)
     with c3:
         p = _img("rs_segment_profiles.png") or _img("seg_cluster_profiles.png")
-        if p: st.image(str(p), caption="Feature Profiles per Segment", use_container_width=True)
+        if p: st.image(str(p), caption="Feature Profiles per Segment", width="stretch")
     with c4:
         p = _img("rs_clv_by_segment.png")
-        if p: st.image(str(p), caption="CLV Distribution per Segment", use_container_width=True)
+        if p: st.image(str(p), caption="CLV Distribution per Segment", width="stretch")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
     st.markdown("**Segment Business Summary**")
     cust_df = load_csv("customer_segments.csv")
     if cust_df is not None and "Segment_Name" in cust_df.columns:
-        clv_col = next((c for c in ["CLV_Predicted_90d", "Predicted_CLV", "Monetary"]
+        clv_col = next((c for c in ["CLV_Predicted_90d", "Predicted_CLV"]
                         if c in cust_df.columns), None)
         if clv_col:
             summary = (cust_df.groupby("Segment_Name")[clv_col]
                        .agg(N="count", Avg_CLV="mean", Total_CLV="sum")
                        .reset_index())
             summary["Revenue_%"] = (summary["Total_CLV"] / summary["Total_CLV"].sum() * 100).round(1)
-            st.dataframe(summary.round(2), use_container_width=True)
+            st.caption("Share of the PREDICTED 90-day CLV of the test customers.")
+            st.dataframe(summary.round(2), width="stretch")
+        else:
+            st.info("customer_segments.csv has no predicted-CLV column.")
 
     with st.expander("More visualisations", expanded=False):
         for fname, cap in [
@@ -636,7 +740,7 @@ with tab2:
             ("seg_elbow_silhouette.png","Elbow + Silhouette"),
         ]:
             p = _img(fname)
-            if p: st.image(str(p), caption=cap, use_container_width=True)
+            if p: st.image(str(p), caption=cap, width="stretch")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -652,7 +756,7 @@ with tab3:
         k1, k2, k3, k4 = st.columns(4)
         with k1: _kpi("Total Customers",   f"{m.get('n_total',0):,}")
         with k2: _kpi("Anomalies Flagged", f"{m.get('n_anomaly',0):,}",
-                       f"{m.get('pct_anomaly',0):.1f}% of fleet", "#E63946")
+                       f"{m.get('pct_anomaly',0):.1f}% of customers", "#E63946")
         with k3: _kpi("High-Return Flags", f"{m.get('n_high_return',0):,}")
         with k4: _kpi("Whale Anomalies",   f"{m.get('n_whale_anomaly',0):,}")
 
@@ -661,24 +765,25 @@ with tab3:
         r1, r2 = st.columns(2)
         with r1:
             p = _img("anomaly_score_distribution.png")
-            if p: st.image(str(p), caption="Score Distribution + Threshold", use_container_width=True)
+            if p: st.image(str(p), caption="Score Distribution + Threshold", width="stretch")
         with r2:
             p = _img("anomaly_feature_importance.png")
-            if p: st.image(str(p), caption="Feature Importance", use_container_width=True)
+            if p: st.image(str(p), caption="Feature Importance", width="stretch")
 
         r3, r4 = st.columns(2)
         with r3:
             p = _img("anomaly_umap.png")
-            if p: st.image(str(p), caption="UMAP — Anomaly Map", use_container_width=True)
+            if p: st.image(str(p), caption="UMAP — Anomaly Map", width="stretch")
         with r4:
             p = _img("anomaly_return_flags.png")
-            if p: st.image(str(p), caption="Return Rate vs Anomaly Score", use_container_width=True)
+            if p: st.image(str(p), caption="Return Rate vs Anomaly Score", width="stretch")
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("**Top Flagged Customers**")
+        st.caption("Offline scores from the training run (Isolation Forest + autoencoder ensemble when available).")
         adf = load_csv("anomaly_scores.csv")
         if adf is not None:
-            show_cols = [c for c in ["Anomaly_Score", "IF_Score", "AE_Score",
+            show_cols = [c for c in ["CustomerID", "Anomaly_Score", "IF_Score", "AE_Score",
                                      "is_anomaly", "is_high_return", "is_suspicious",
                                      "Recency", "Frequency", "Monetary", "Return_Rate"]
                          if c in adf.columns]
@@ -688,8 +793,9 @@ with tab3:
                     if v >= 0.65: return "background-color:#E6394633"
                     if v >= 0.50: return "background-color:#F4A26133"
                 return ""
-            st.dataframe(top50.style.map(_cs, subset=["Anomaly_Score"]),
-                         use_container_width=True, height=360)
+            _sty = top50.style
+            _apply = getattr(_sty, "map", None) or _sty.applymap     # pandas >= 2.1 uses .map
+            st.dataframe(_apply(_cs, subset=["Anomaly_Score"]), width="stretch", height=360)
             buf = io.StringIO()
             top50.to_csv(buf, index=False)
             st.download_button("⬇️ Download CSV", buf.getvalue().encode(),
@@ -697,6 +803,7 @@ with tab3:
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("**Score a Single Customer**")
+        st.caption("Live scoring uses the Isolation Forest only (the autoencoder is used in the offline analysis).")
         cols_u = anomaly_bundle.get("cols_used", list(FEATURE_DEFAULTS.keys())[:12])
         sc1, sc2, sc3 = st.columns(3)
         fi = {}
@@ -716,7 +823,7 @@ with tab3:
                                               float(dv), float(sv), key=f"a_{col}")
 
         if st.button("Calculate Anomaly Score", type="primary",
-                     use_container_width=True, key="ascore_btn"):
+                     width="stretch", key="ascore_btn"):
             res = _score_anomaly(anomaly_bundle, fi)
             rc  = RISK_COLOURS.get(res["risk"], "#2A9D8F")
             x1, x2, x3 = st.columns(3)
@@ -726,19 +833,22 @@ with tab3:
                     f'<div class="card-title">Risk Level</div>'
                     f'<div class="card-value" style="color:{rc}">{res["risk"]}</div>'
                     f'</div>', unsafe_allow_html=True)
-            x2.metric("Anomaly Score", f"{res['score']:.4f}")
-            x3.metric("Status", "⚠️ Flagged" if res["is_anomaly"] else "✅ Normal")
+            x2.metric("Anomaly Score", "n/a" if res.get("error") else f"{res['score']:.4f}")
+            x3.metric("Status", "❔ Unknown" if res.get("error")
+                      else ("⚠️ Flagged" if res["is_anomaly"] else "✅ Normal"))
 
-            if res["is_anomaly"]:
+            if res.get("error"):
+                st.warning("The score could not be computed. Check the server log for details.")
+            elif res["is_anomaly"]:
                 st.error("This customer is flagged — review transaction history.")
             else:
-                st.success("Customer behaviour is within normal range.")
+                st.success("Customer behaviour is within the normal range.")
 
         with st.expander("Model details", expanded=False):
             p = _img("anomaly_reconstruction_error.png")
-            if p: st.image(str(p), caption="Autoencoder Training Loss", use_container_width=True)
+            if p: st.image(str(p), caption="Autoencoder training loss (offline analysis only)", width="stretch")
             p = _img("anomaly_top_customers.png")
-            if p: st.image(str(p), caption="Top 20 Anomaly Profiles", use_container_width=True)
+            if p: st.image(str(p), caption="Top 20 Anomaly Profiles", width="stretch")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -746,7 +856,7 @@ with tab3:
 # ═════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.markdown("#### Product Intelligence — Association Rules")
-    st.caption("FP-Growth market basket analysis on 400K transactions.")
+    st.caption("FP-Growth market basket analysis on customer transactions.")
 
     if ar_bundle is None:
         st.warning("⏳ Run `run_association_rules_pipeline()` first.")
@@ -760,13 +870,12 @@ with tab4:
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("**Cross-Sell Recommendation Engine**")
-        st.caption("Enter a product name (partial match supported).")
+        st.caption("Enter a product name (partial match supported). Up to 5 suggestions are stored per product.")
 
         lookup = ar_bundle.get("lookup", {})
         # Only show clean single-product keys (not frozensets)
-        clean_samples = [k for k in lookup.keys()
-                         if isinstance(k, str) and not k.startswith("frozenset")][:5]
-        samples = clean_samples
+        samples = [k for k in lookup.keys()
+                   if isinstance(k, str) and not k.startswith("frozenset")][:5]
 
         col_in, col_n = st.columns([3, 1])
         with col_in:
@@ -775,7 +884,7 @@ with tab4:
                 key="ar_input", label_visibility="collapsed"
             )
         with col_n:
-            top_n = st.selectbox("Top N", [3, 5, 10], index=1, label_visibility="collapsed")
+            top_n = st.selectbox("Top N", [3, 5], index=1, label_visibility="collapsed")
 
         if samples:
             st.caption(f"Try: {' · '.join(samples[:5])}")
@@ -798,33 +907,33 @@ with tab4:
                         unsafe_allow_html=True,
                     )
             else:
-                st.warning(f"No results for '{product_input}'. Try: HEART, WHITE, RED, CANDLE.")
+                st.warning(f"No results for '{product_input}'. Try one of the product names listed above.")
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("**Rule Analysis**")
         p1, p2 = st.columns(2)
         with p1:
             p = _img("ar_support_confidence.png")
-            if p: st.image(str(p), caption="Support vs Confidence", use_container_width=True)
+            if p: st.image(str(p), caption="Support vs Confidence", width="stretch")
             else: st.info("Run association rules pipeline to generate plots.")
         with p2:
             p = _img("ar_lift_heatmap.png")
-            if p: st.image(str(p), caption="Lift Matrix — Top 15 Products", use_container_width=True)
+            if p: st.image(str(p), caption="Lift Matrix — Top 15 Products", width="stretch")
 
         p3, p4 = st.columns(2)
         with p3:
             p = _img("ar_top_rules_bar.png")
-            if p: st.image(str(p), caption="Top 20 Rules by Lift", use_container_width=True)
+            if p: st.image(str(p), caption="Top 20 Rules by Lift", width="stretch")
         with p4:
             p = _img("ar_segment_comparison.png")
-            if p: st.image(str(p), caption="Champions vs Loyal Customers", use_container_width=True)
+            if p: st.image(str(p), caption="Product affinity by customer segment", width="stretch")
 
         st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
         st.markdown("**Full Rules Table**")
         rules_df = load_csv("association_rules.csv")
         if rules_df is not None:
             st.dataframe(rules_df.sort_values("lift", ascending=False).head(100).round(4),
-                         use_container_width=True, height=320)
+                         width="stretch", height=320)
             buf = io.StringIO()
             rules_df.to_csv(buf, index=False)
             st.download_button("⬇️ Download Rules CSV",
@@ -839,7 +948,7 @@ with tab5:
     st.caption("Upload a customer CSV — CLV prediction, segmentation, and anomaly scoring in one run.")
 
     uploaded = st.file_uploader(
-        "Upload CSV (any subset of 16 features)", type=["csv"],
+        "Upload CSV (columns named like the 16 model features)", type=["csv"],
         label_visibility="collapsed"
     )
 
@@ -848,30 +957,32 @@ with tab5:
             df = pd.read_csv(uploaded, encoding="ISO-8859-1")
             st.success(f"Loaded {len(df):,} customers from `{uploaded.name}`")
 
+            missing_cols = [c for c in FEATURE_COLS if c not in df.columns]
+            if missing_cols:
+                st.warning(
+                    f"{len(missing_cols)} of the 16 model features are missing from your file and will be "
+                    f"filled with typical default values: {', '.join(missing_cols)}. "
+                    f"Predictions then reflect those defaults rather than your customers."
+                )
+
             opt1, opt2 = st.columns(2)
             with opt1:
                 run_seg  = st.checkbox("Include segment assignment", value=True)
             with opt2:
-                run_anom = st.checkbox("Include anomaly scoring", value=False)
+                run_anom = st.checkbox("Include anomaly scoring (Isolation Forest only)", value=False)
 
-            if st.button("▶️ Run Batch Analysis", type="primary", use_container_width=True):
+            if st.button("▶️ Run Batch Analysis", type="primary", width="stretch"):
                 with st.spinner("Running…"):
                     result_df, dollar_preds = _batch_predict(model, df)
 
                     if run_seg and seg_bundle is not None:
-                        result_df["K_Segment"] = [
-                            _assign_cluster(
-                                pd.DataFrame([r.to_dict()])[FEATURE_COLS], seg_bundle
-                            )[1]
-                            for _, r in result_df[FEATURE_COLS].iterrows()
-                        ]
+                        result_df["K_Segment"] = _assign_clusters_batch(result_df, seg_bundle)
 
                     if run_anom and anomaly_bundle is not None:
-                        scores = [_score_anomaly(anomaly_bundle, r.to_dict())["score"]
-                                  for _, r in result_df.iterrows()]
+                        scores = _score_anomaly_batch(anomaly_bundle, result_df)
                         result_df["Anomaly_Score"] = np.round(scores, 4)
                         result_df["Risk"] = [
-                            "🔴 High" if s >= 0.65 else ("🟡 Med" if s >= 0.40 else "🟢 Low")
+                            "⚪ Unknown" if np.isnan(s) else _risk_label(s, short=True)
                             for s in scores
                         ]
 
@@ -887,10 +998,12 @@ with tab5:
                                accent="#5C4DB1")
 
                 st.markdown("**Results Preview**")
-                preview = ["CLV_Predicted_90d", "CLV_Low", "CLV_High", "Segment"]
+                id_col  = next((c for c in ["Customer ID", "Customer_ID", "CustomerID"]
+                                if c in result_df.columns), None)
+                preview = ([id_col] if id_col else []) + ["CLV_Predicted_90d", "CLV_Low", "CLV_High", "Segment"]
                 if "K_Segment"     in result_df.columns: preview.append("K_Segment")
                 if "Anomaly_Score" in result_df.columns: preview += ["Anomaly_Score", "Risk"]
-                st.dataframe(result_df[preview].head(50), use_container_width=True)
+                st.dataframe(result_df[preview].head(50), width="stretch")
 
                 st.markdown("**Segment Breakdown**")
                 seg_col = "K_Segment" if "K_Segment" in result_df.columns else "Segment"
@@ -898,7 +1011,7 @@ with tab5:
                            .agg(N="count", Avg_CLV="mean", Total_CLV="sum")
                            .reset_index())
                 seg_agg["Revenue_%"] = (seg_agg["Total_CLV"] / seg_agg["Total_CLV"].sum() * 100).round(1)
-                st.dataframe(seg_agg.round(2), use_container_width=True)
+                st.dataframe(seg_agg.round(2), width="stretch")
 
                 buf = io.StringIO()
                 result_df.to_csv(buf, index=False)
@@ -907,9 +1020,10 @@ with tab5:
                     data=buf.getvalue().encode(),
                     file_name="batch_results.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                     type="primary",
                 )
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            logger.exception("Batch analysis failed")
+            st.error(f"Could not process the file ({type(e).__name__}). Check that it is a CSV with numeric feature columns.")
